@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "459514121438",
+    "project_id": "waiapp-f2024",
+    "storage_bucket": "waiapp-f2024.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:459514121438:android:7aa44abbf0717dc990864f",
+        "android_client_info": {
+          "package_name": "com.example.wai"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "459514121438-nr19j9fv3bj2g3hfqh4l0eqqq9vr442v.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.wai",
+            "certificate_hash": "764e049c2fea75765fbdbad7dd54cd202ac18446"
+          }
+        },
+        {
+          "client_id": "459514121438-5lki1vt1ct6nu5apnj04inm764u60fu8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDsFEhCCKs3d3UlMQMdThIBk1fRvD2D7G4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "459514121438-5lki1vt1ct6nu5apnj04inm764u60fu8.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
