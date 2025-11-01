@@ -1,27 +1,15 @@
+import '../entities/comment_entity.dart';
 import '../repositories/books_repository.dart';
 
-class AddCommentParams {
-  AddCommentParams({
-    required this.bookId,
-    required this.content,
-    this.parentId,
-  });
+class AddCommentUseCase {
+	const AddCommentUseCase(this._repository);
 
-  final String bookId;
-  final String content;
-  final String? parentId;
-}
+	final BooksRepository _repository;
 
-class AddComment {
-  AddComment(this._repository);
-
-  final BooksRepository _repository;
-
-  Future<void> call(AddCommentParams params) {
-    return _repository.addComment(
-      bookId: params.bookId,
-      content: params.content,
-      parentId: params.parentId,
-    );
-  }
+	Future<void> call({
+		required String bookId,
+		required CommentEntity comment,
+	}) {
+		return _repository.addComment(bookId: bookId, comment: comment);
+	}
 }

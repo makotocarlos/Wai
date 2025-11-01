@@ -1,78 +1,106 @@
-import 'dart:io';
-
 import '../entities/book_entity.dart';
-import '../entities/book_reaction.dart';
 import '../entities/chapter_entity.dart';
 import '../entities/comment_entity.dart';
 
 abstract class BooksRepository {
-  Future<void> createBook({
-    required String title,
-    required String category,
-    required List<ChapterEntity> chapters,
-    required int publishedChapterOrder,
-    String? description,
-    File? coverFile,
-  });
+	Stream<List<BookEntity>> watchBooks({String? userId});
 
-  Stream<List<BookEntity>> watchBooks();
+	Stream<BookEntity> watchBook({
+		required String bookId,
+		required String userId,
+	});
 
-  Stream<List<BookEntity>> watchUserBooks();
+	Future<BookEntity> createBook({
+		required String authorId,
+		required String authorName,
+		required String title,
+		required String category,
+		required String description,
+		required List<ChapterEntity> chapters,
+		required int publishedChapterIndex,
+		String? coverPath,
+	});
 
-  Stream<BookEntity> watchBook(String bookId);
+	Future<void> addView({
+		required String bookId,
+		required String userId,
+	});
 
-  Future<void> addComment({
-    required String bookId,
-    required String content,
-    String? parentId,
-  });
+	Future<void> reactToBook({
+		required String bookId,
+		required String userId,
+		required BookReactionType? reaction,
+	});
 
-  Stream<List<CommentEntity>> watchComments(String bookId);
+	Stream<List<BookEntity>> watchFavoriteBooks({
+		required String userId,
+	});
 
-  Future<void> addChapterComment({
-    required String bookId,
-    required int chapterOrder,
-    required String content,
-    String? parentId,
-  });
+	Future<void> toggleFavorite({
+		required String bookId,
+		required String userId,
+	});
 
-  Stream<List<CommentEntity>> watchChapterComments({
-    required String bookId,
-    required int chapterOrder,
-  });
+	Future<void> addComment({
+		required String bookId,
+		required CommentEntity comment,
+	});
 
-  Future<void> incrementBookViews(String bookId);
+	/// Responder a un comentario existente (YouTube-style)
+	Future<void> replyToComment({
+		required String bookId,
+		required String parentCommentId,
+		required CommentEntity reply,
+	});
 
-  Future<BookReaction> reactToBook({
-    required String bookId,
-    required bool isLike,
-    int delta,
-  });
+	/// Retorna comentarios en estructura jerárquica (root + replies)
+	Stream<List<CommentEntity>> watchComments(String bookId, {String? userId});
 
-  Future<BookReaction> getUserBookReaction(String bookId);
+	// ===== Comentarios de Capítulos =====
 
-  Future<BookReaction> reactToComment({
-    required String bookId,
-    required String commentId,
-    required bool isLike,
-    int? chapterOrder,
-  });
+	/// Agregar comentario a un capítulo específico
+	Future<void> addChapterComment({
+		required String chapterId,
+		required CommentEntity comment,
+	});
 
-  Future<Map<String, BookReaction>> getUserCommentReactions({
-    required String bookId,
-    int? chapterOrder,
-  });
+	/// Responder a un comentario de capítulo
+	Future<void> replyToChapterComment({
+		required String chapterId,
+		required String parentCommentId,
+		required CommentEntity reply,
+	});
 
-  Future<void> updateBook({
-    required String bookId,
-    required String title,
-    required String category,
-    required List<ChapterEntity> chapters,
-    required int publishedChapterOrder,
-    String? description,
-    File? coverFile,
-    bool removeCover = false,
-  });
+	/// Retorna comentarios de capítulo en estructura jerárquica
+	Stream<List<CommentEntity>> watchChapterComments(String chapterId, {String? userId});
 
-  Future<void> deleteBook(String bookId);
+	// ===== Likes en Comentarios =====
+
+	/// Dar/quitar like a un comentario de libro
+	Future<void> toggleCommentLike({
+		required String commentId,
+		required String userId,
+		required bool isLiked,
+	});
+
+	/// Dar/quitar like a un comentario de capítulo
+	Future<void> toggleChapterCommentLike({
+		required String commentId,
+		required String userId,
+		required bool isLiked,
+	});
+
+	/// Actualizar un libro existente
+	Future<BookEntity> updateBook({
+		required String bookId,
+		String? title,
+		String? description,
+		String? category,
+		String? coverPath,
+		List<ChapterEntity>? chapters,
+		int? publishedChapterIndex,
+	});
+
+	/// Eliminar un libro
+	Future<void> deleteBook({required String bookId});
 }

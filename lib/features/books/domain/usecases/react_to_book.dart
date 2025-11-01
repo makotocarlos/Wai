@@ -1,28 +1,20 @@
-import '../entities/book_reaction.dart';
+import '../entities/book_entity.dart';
 import '../repositories/books_repository.dart';
 
-class ReactToBookParams {
-  ReactToBookParams({
-    required this.bookId,
-    required this.isLike,
-    this.delta = 1,
-  });
+class ReactToBookUseCase {
+	const ReactToBookUseCase(this._repository);
 
-  final String bookId;
-  final bool isLike;
-  final int delta;
-}
+	final BooksRepository _repository;
 
-class ReactToBook {
-  ReactToBook(this._repository);
-
-  final BooksRepository _repository;
-
-  Future<BookReaction> call(ReactToBookParams params) {
-    return _repository.reactToBook(
-      bookId: params.bookId,
-      isLike: params.isLike,
-      delta: params.delta,
-    );
-  }
+	Future<void> call({
+		required String bookId,
+		required String userId,
+		required BookReactionType? reaction,
+	}) {
+		return _repository.reactToBook(
+			bookId: bookId,
+			userId: userId,
+			reaction: reaction,
+		);
+	}
 }

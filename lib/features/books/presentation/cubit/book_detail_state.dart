@@ -1,46 +1,42 @@
 import 'package:equatable/equatable.dart';
 
 import '../../domain/entities/book_entity.dart';
-import '../../domain/entities/book_reaction.dart';
 import '../../domain/entities/comment_entity.dart';
 
+enum BookDetailStatus { loading, success, failure }
+
 class BookDetailState extends Equatable {
-  const BookDetailState({
-    this.book,
-    this.comments = const [],
-    this.isLoading = false,
-    this.error,
-    this.userReaction = BookReaction.none,
-    this.commentReactions = const {},
-  });
+	const BookDetailState({
+		this.status = BookDetailStatus.loading,
+		this.book,
+		this.comments = const [],
+		this.commentsLoading = true,
+		this.errorMessage,
+	});
 
-  final BookEntity? book;
-  final List<CommentEntity> comments;
-  final bool isLoading;
-  final String? error;
-  final BookReaction userReaction;
-  final Map<String, BookReaction> commentReactions;
+	final BookDetailStatus status;
+	final BookEntity? book;
+	final List<CommentEntity> comments;
+		final bool commentsLoading;
+	final String? errorMessage;
 
-  BookDetailState copyWith({
-    BookEntity? book,
-    List<CommentEntity>? comments,
-    bool? isLoading,
-    String? error,
-    bool clearError = false,
-    BookReaction? userReaction,
-    Map<String, BookReaction>? commentReactions,
-  }) {
-    return BookDetailState(
-      book: book ?? this.book,
-      comments: comments ?? this.comments,
-      isLoading: isLoading ?? this.isLoading,
-      error: clearError ? null : (error ?? this.error),
-      userReaction: userReaction ?? this.userReaction,
-      commentReactions: commentReactions ?? this.commentReactions,
-    );
-  }
+	BookDetailState copyWith({
+		BookDetailStatus? status,
+		BookEntity? book,
+		List<CommentEntity>? comments,
+			bool? commentsLoading,
+		String? errorMessage,
+		bool clearError = false,
+	}) {
+		return BookDetailState(
+			status: status ?? this.status,
+			book: book ?? this.book,
+			comments: comments ?? this.comments,
+				commentsLoading: commentsLoading ?? this.commentsLoading,
+			errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+		);
+	}
 
-  @override
-  List<Object?> get props =>
-      [book, comments, isLoading, error, userReaction, commentReactions];
+	@override
+		List<Object?> get props => [status, book, comments, commentsLoading, errorMessage];
 }

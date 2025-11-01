@@ -1,217 +1,171 @@
-// lib/features/auth/presentation/pages/login_page.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:wappa_app/shared/widgets/SubtitleText.dart';
-import '../../../../shared/widgets/AppLogo.dart';
-import '../../../../shared/widgets/CustomTextField.dart';
-import '../../../../shared/widgets/OutlinedButtonCustom.dart';
-import '../../../../shared/widgets/PrimaryButton.dart';
+
 import '../bloc/auth_bloc.dart';
-import '../bloc/auth_event.dart';
-import '../bloc/auth_state.dart';
 import 'forgot_password_screen.dart';
 import 'register_screen.dart';
-import '../../domain/usecases/check_username_exists.dart';
 
-class LoginPage extends StatelessWidget {
-  const LoginPage({super.key, required this.checkUsernameExists});
+class LoginPage extends StatefulWidget {
+	const LoginPage({super.key});
 
-  final CheckUsernameExists checkUsernameExists;
+	static const String routeName = '/login';
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: SafeArea(
-        child: _LoginView(checkUsernameExists: checkUsernameExists),
-      ),
-    );
-  }
+	@override
+	State<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginView extends StatefulWidget {
-  const _LoginView({required this.checkUsernameExists});
+class _LoginPageState extends State<LoginPage> {
+	final _formKey = GlobalKey<FormState>();
+	final _emailController = TextEditingController();
+	final _passwordController = TextEditingController();
+	bool _obscurePassword = true;
 
-  final CheckUsernameExists checkUsernameExists;
+	@override
+	void dispose() {
+		_emailController.dispose();
+		_passwordController.dispose();
+		super.dispose();
+	}
 
-  @override
-  State<_LoginView> createState() => _LoginViewState();
-}
+	void _submit() {
+		if (!_formKey.currentState!.validate()) {
+			return;
+		}
 
-class _LoginViewState extends State<_LoginView> {
-  final emailCtrl = TextEditingController();
-  final passCtrl = TextEditingController();
+		context.read<AuthBloc>().add(
+					AuthSignInRequested(
+						email: _emailController.text.trim(),
+						password: _passwordController.text,
+					),
+				);
+	}
 
-  @override
-  Widget build(BuildContext context) {
-    final bloc = context.read<AuthBloc>();
+	@override
+	Widget build(BuildContext context) {
+		final theme = Theme.of(context);
+		final isLoading = context.watch<AuthBloc>().state.status == AuthStatus.loading;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24.0),
-      child: Column(
-        children: [
-          const Spacer(),
-          // Logo y subtítulo
-          Stack(
-            alignment: Alignment.topCenter,
-            children: [
-              const AppLogo(size: 150),
-              Transform.translate(
-                offset: const Offset(0, 120),
-                child: const SubtitleText('Aplicación narrativa W-AI'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 80),
-
-          // Botón Google
-          OutlinedButtonCustom(
-            text: 'Regístrate con Google',
-            icon: Icons.g_mobiledata,
-            onPressed: () => bloc.add(SignInWithGoogleEvent()),
-          ),
-          const SizedBox(height: 18),
-
-          // Botón registro con correo
-          PrimaryButton(
-            text: 'Regístrate con un correo electrónico',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => RegisterPage(
-                    checkUsernameExists: widget.checkUsernameExists,
-                  ),
-                ),
-              );
-            },
-          ),
-
-          const Spacer(),
-
-          // Login
-          TextButton(
-            onPressed: () => _showEmailForm(context, bloc),
-            child: const Text(
-              'Ya tengo una cuenta',
-              style: TextStyle(color: Colors.white70),
-            ),
-          ),
-          const SizedBox(height: 20),
-        ],
-      ),
-    );
-  }
-
-  void _showEmailForm(BuildContext context, AuthBloc bloc) {
-    showModalBottomSheet(
-      isScrollControlled: true,
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        String? _errorMessage;
-        bool _showPassword = false;
-
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
-              ),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.grey[900],
-                  borderRadius:
-                      const BorderRadius.vertical(top: Radius.circular(24)),
-                ),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-                child: BlocConsumer<AuthBloc, AuthState>(
-                  listener: (context, state) {
-                    if (state is Authenticated) {
-                      Navigator.pop(ctx);
-                    } else if (state is AuthFailure) {
-                      setState(() {
-                        _errorMessage = state.message;
-                      });
-                    }
-                  },
-                  builder: (context, state) {
-                    return SingleChildScrollView(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          CustomTextField(
-                            controller: emailCtrl,
-                            hint: 'Correo',
-                            keyboardType: TextInputType.emailAddress,
-                          ),
-                          const SizedBox(height: 8),
-                          CustomTextField(
-                            controller: passCtrl,
-                            hint: 'Contraseña',
-                            obscure: !_showPassword,
-                            suffixIcon: IconButton(
-                              icon: Icon(
-                                _showPassword
-                                    ? Icons.visibility_off
-                                    : Icons.visibility,
-                                color: Colors.white54,
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  _showPassword = !_showPassword;
-                                });
-                              },
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          if (_errorMessage != null)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: Text(
-                                _errorMessage!,
-                                style: const TextStyle(
-                                  color: Colors.red,
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ),
-                          PrimaryButton(
-                            text:
-                                state is AuthLoading ? 'Cargando...' : 'Entrar',
-                            onPressed: () {
-                              final email = emailCtrl.text.trim();
-                              final pass = passCtrl.text.trim();
-                              bloc.add(SignInWithEmailEvent(email, pass));
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                          OutlinedButtonCustom(
-                            text: '¿Olvidaste tu contraseña?',
-                            icon: Icons.lock_open,
-                            onPressed: () {
-                              Navigator.pop(ctx);
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const ForgotPasswordScreen(),
-                                ),
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 12),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
+		return Scaffold(
+			body: SafeArea(
+				child: Center(
+					child: SingleChildScrollView(
+						padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+						child: ConstrainedBox(
+							constraints: const BoxConstraints(maxWidth: 420),
+							child: Form(
+								key: _formKey,
+								child: Column(
+									crossAxisAlignment: CrossAxisAlignment.stretch,
+									children: [
+										Center(
+											child: Image.asset(
+												'assets/logo.png',
+												height: 120,
+											),
+										),
+										const SizedBox(height: 16),
+										Text(
+											'WAI',
+											style: theme.textTheme.displaySmall?.copyWith(
+												color: theme.colorScheme.primary,
+												fontWeight: FontWeight.bold,
+											),
+											textAlign: TextAlign.center,
+										),
+										const SizedBox(height: 8),
+										Text(
+											'Inicia sesion para continuar escribiendo',
+											style: theme.textTheme.bodyLarge,
+											textAlign: TextAlign.center,
+										),
+										const SizedBox(height: 32),
+										TextFormField(
+											controller: _emailController,
+											keyboardType: TextInputType.emailAddress,
+											textInputAction: TextInputAction.next,
+											decoration: const InputDecoration(
+												labelText: 'Correo electronico',
+												prefixIcon: Icon(Icons.mail_outline),
+											),
+											validator: (value) {
+												if (value == null || value.trim().isEmpty) {
+													return 'Ingresa tu correo';
+												}
+												if (!value.contains('@')) {
+													return 'Correo invalido';
+												}
+												return null;
+											},
+										),
+										const SizedBox(height: 16),
+										TextFormField(
+											controller: _passwordController,
+											obscureText: _obscurePassword,
+											textInputAction: TextInputAction.done,
+											onFieldSubmitted: (_) => _submit(),
+											decoration: InputDecoration(
+												labelText: 'Contrasena',
+												prefixIcon: const Icon(Icons.lock_outline),
+												suffixIcon: IconButton(
+													onPressed: () => setState(() {
+														_obscurePassword = !_obscurePassword;
+													}),
+													icon: Icon(
+														_obscurePassword ? Icons.visibility : Icons.visibility_off,
+													),
+												),
+											),
+											validator: (value) {
+												if (value == null || value.isEmpty) {
+													return 'Ingresa tu contrasena';
+												}
+												if (value.length < 6) {
+													return 'La contrasena debe tener al menos 6 caracteres';
+												}
+												return null;
+											},
+										),
+										const SizedBox(height: 12),
+										Align(
+											alignment: Alignment.centerRight,
+											child: TextButton(
+												onPressed: () => Navigator.of(context).pushNamed(
+													ForgotPasswordScreen.routeName,
+												),
+												child: const Text('Olvidaste tu contrasena?'),
+											),
+										),
+										const SizedBox(height: 24),
+										ElevatedButton(
+											onPressed: isLoading ? null : _submit,
+											child: isLoading
+												? const SizedBox(
+														height: 20,
+														width: 20,
+														child: CircularProgressIndicator(strokeWidth: 2),
+													)
+												: const Text('Iniciar sesion'),
+										),
+										const SizedBox(height: 16),
+										Row(
+											mainAxisAlignment: MainAxisAlignment.center,
+											children: [
+												const Text('No tienes cuenta?'),
+												TextButton(
+													onPressed: () => Navigator.of(context).pushNamed(
+														RegisterScreen.routeName,
+													),
+													child: const Text('Registrate'),
+												),
+											],
+										),
+									],
+								),
+							),
+						),
+					),
+				),
+			),
+		);
+	}
 }

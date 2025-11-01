@@ -1,9 +1,11 @@
-// lib/features/auth/domain/usecases/sign_out.dart
 import '../repositories/auth_repository.dart';
 
-class SignOut {
-  final AuthRepository repository;
-  SignOut(this.repository);
+class SignOutUseCase {
+	const SignOutUseCase(this._repository);
 
-  Future<void> call() => repository.signOut();
+	final AuthRepository _repository;
+
+	Future<void> call() {
+		return _repository.signOut();
+	}
 }

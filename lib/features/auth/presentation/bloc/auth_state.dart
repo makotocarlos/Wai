@@ -1,29 +1,37 @@
-import 'package:equatable/equatable.dart';
-import '../../domain/entities/user_entity.dart';
+part of 'auth_bloc.dart';
 
-abstract class AuthState extends Equatable {
-  const AuthState();
-  @override
-  List<Object?> get props => [];
+enum AuthStatus { initial, loading, authenticated, unauthenticated }
+
+class AuthState extends Equatable {
+	const AuthState({
+		this.status = AuthStatus.initial,
+		this.user,
+		this.errorMessage,
+		this.infoMessage,
+	});
+
+	final AuthStatus status;
+	final UserEntity? user;
+	final String? errorMessage;
+	final String? infoMessage;
+
+	AuthState copyWith({
+		AuthStatus? status,
+		UserEntity? user,
+		bool clearUser = false,
+		String? errorMessage,
+		bool clearError = false,
+		String? infoMessage,
+		bool clearInfo = false,
+	}) {
+		return AuthState(
+			status: status ?? this.status,
+			user: clearUser ? null : user ?? this.user,
+			errorMessage: clearError ? null : errorMessage ?? this.errorMessage,
+			infoMessage: clearInfo ? null : infoMessage ?? this.infoMessage,
+		);
+	}
+
+	@override
+	List<Object?> get props => [status, user, errorMessage, infoMessage];
 }
-
-class AuthInitial extends AuthState {}
-
-class AuthLoading extends AuthState {}
-
-class Authenticated extends AuthState {
-  final UserEntity user;
-  final String? infoMessage;
-  const Authenticated(this.user, {this.infoMessage});
-  @override
-  List<Object?> get props => [user, infoMessage];
-}
-
-class AuthFailure extends AuthState {
-  final String message;
-  const AuthFailure(this.message);
-  @override
-  List<Object?> get props => [message];
-}
-
-class Unauthenticated extends AuthState {}

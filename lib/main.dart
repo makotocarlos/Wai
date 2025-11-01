@@ -1,111 +1,145 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:firebase_core/firebase_core.dart';
 
 import 'core/di/injection.dart';
+import 'core/supabase/supabase_service.dart';
 import 'features/auth/presentation/bloc/auth_bloc.dart';
-import 'features/auth/presentation/bloc/auth_event.dart';
-import 'features/auth/presentation/bloc/auth_state.dart';
+import 'features/auth/presentation/pages/forgot_password_screen.dart';
 import 'features/auth/presentation/pages/login_page.dart';
-import 'features/auth/domain/usecases/check_username_exists.dart';
-import 'features/books/presentation/cubit/book_list_cubit.dart';
-import 'shared/widgets/main_layout.dart';
+import 'features/auth/presentation/pages/register_screen.dart';
+import 'screens/home/home_screen.dart';
+import 'shared/theme/app_theme.dart';
 
-void main() async {
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  final client = await SupabaseService.initialize();
 
-  // Inicializa Firebase
-  await Firebase.initializeApp();
+  if (client == null) {
+    runApp(const SupabaseErrorApp());
+    return;
+  }
 
-  // Inyección de dependencias
-  await initDependencies();
+  await initInjection(client);
 
-  runApp(const MyApp());
+  runApp(const WaiRoot());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class WaiRoot extends StatelessWidget {
+  const WaiRoot({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MultiBlocProvider(
-      providers: [
-        BlocProvider<AuthBloc>(
-          create: (_) => sl<AuthBloc>()..add(const AuthCheckRequested()),
-        ),
-        BlocProvider<BookListCubit>(
-          create: (_) => sl<BookListCubit>()..start(),
-        ),
-      ],
-      child: MaterialApp(
-        debugShowCheckedModeBanner: false,
-        title: 'Wappa App',
-        theme: ThemeData.dark().copyWith(
-          primaryColor: Colors.green,
-          elevatedButtonTheme: ElevatedButtonThemeData(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
-              minimumSize: const Size.fromHeight(50),
-            ),
-          ),
-        ),
-        // Pantalla inicial
-        home: const AppRoot(),
+    return BlocProvider(
+      create: (_) => sl<AuthBloc>()..add(const AuthInitialize()),
+      child: const WaiApp(),
+    );
+  }
+}
+
+class WaiApp extends StatelessWidget {
+  const WaiApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'WAI',
+      theme: AppTheme.darkGreen,
+      routes: {
+        RegisterScreen.routeName: (_) => const RegisterScreen(),
+        ForgotPasswordScreen.routeName: (_) => const ForgotPasswordScreen(),
+        HomeScreen.routeName: (_) => const HomeScreen(),
+      },
+      home: const AuthWrapper(),
+    );
+  }
+}
+
+class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocListener<AuthBloc, AuthState>(
+      listenWhen: (previous, current) =>
+          previous.errorMessage != current.errorMessage,
+      listener: (context, state) {
+        if (state.errorMessage != null && state.errorMessage!.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(state.errorMessage!)),
+          );
+        }
+      },
+      child: BlocBuilder<AuthBloc, AuthState>(
+        builder: (context, state) {
+          switch (state.status) {
+            case AuthStatus.initial:
+            case AuthStatus.loading:
+              return const _AuthLoading();
+            case AuthStatus.authenticated:
+              return const HomeScreen();
+            case AuthStatus.unauthenticated:
+              return const LoginPage();
+          }
+        },
       ),
     );
   }
 }
 
-class AppRoot extends StatelessWidget {
-  const AppRoot({super.key});
+class _AuthLoading extends StatelessWidget {
+  const _AuthLoading();
 
   @override
   Widget build(BuildContext context) {
-    return BlocListener<AuthBloc, AuthState>(
-    listenWhen: (previous, current) =>
-      (current is Authenticated && previous is! Authenticated) ||
-      current is AuthFailure,
-      listener: (context, state) {
-        if (state is Authenticated) {
-          final lines = <String>[];
-          final email = state.user.email;
-          lines.add(
-            email != null && email.isNotEmpty
-                ? 'Bienvenido $email'
-                : 'Bienvenido',
-          );
-          final infoMessage = state.infoMessage;
-          if (infoMessage != null && infoMessage.isNotEmpty) {
-            lines.add(infoMessage);
-          }
-          final message = lines.join('\n');
-          if (message.isNotEmpty) {
-            ScaffoldMessenger.of(context)
-              ..hideCurrentSnackBar()
-              ..showSnackBar(SnackBar(content: Text(message)));
-          }
-        } else if (state is AuthFailure) {
-          ScaffoldMessenger.of(context)
-            ..hideCurrentSnackBar()
-            ..showSnackBar(SnackBar(content: Text(state.message)));
-        }
-      },
-      child: BlocBuilder<AuthBloc, AuthState>(
-        builder: (context, state) {
-          if (state is AuthLoading || state is AuthInitial) {
-            return const Scaffold(
-              backgroundColor: Colors.black,
-              body: Center(child: CircularProgressIndicator()),
-            );
-          }
-          if (state is Authenticated) {
-            return const MainLayout();
-          }
-          return LoginPage(
-            checkUsernameExists: sl<CheckUsernameExists>(),
-          );
-        },
+    return const Scaffold(
+      body: Center(
+        child: SizedBox(
+          height: 48,
+          width: 48,
+          child: CircularProgressIndicator(),
+        ),
+      ),
+    );
+  }
+}
+
+class SupabaseErrorApp extends StatelessWidget {
+  const SupabaseErrorApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.darkGreen,
+      home: Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                Icon(
+                  Icons.warning_amber_rounded,
+                  size: 48,
+                  color: Color(0xFF00FF88),
+                ),
+                SizedBox(height: 16),
+                Text(
+                  'Faltan las variables de Supabase',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
+                ),
+                SizedBox(height: 12),
+                Text(
+                  'Ejecuta la app con --dart-define=SUPABASE_URL=... y --dart-define=SUPABASE_ANON_KEY=... para inicializar la sesión.',
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

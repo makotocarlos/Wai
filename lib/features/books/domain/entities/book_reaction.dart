@@ -1,29 +1,16 @@
-enum BookReaction {
-	like,
-	dislike,
-	none,
-}
+import 'package:equatable/equatable.dart';
 
-extension BookReactionX on BookReaction {
-	static BookReaction fromString(String? value) {
-		switch (value) {
-			case 'like':
-				return BookReaction.like;
-			case 'dislike':
-				return BookReaction.dislike;
-			default:
-				return BookReaction.none;
-		}
-	}
+import 'book_entity.dart';
 
-	String? toNullableString() {
-		switch (this) {
-			case BookReaction.like:
-				return 'like';
-			case BookReaction.dislike:
-				return 'dislike';
-			case BookReaction.none:
-				return null;
-		}
-	}
+class BookReaction extends Equatable {
+	const BookReaction({
+		required this.userId,
+		required this.type,
+	});
+
+	final String userId;
+	final BookReactionType type;
+
+	@override
+	List<Object?> get props => [userId, type];
 }

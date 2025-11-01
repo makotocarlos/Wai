@@ -1,11 +1,14 @@
 import '../repositories/books_repository.dart';
 
-class IncrementBookViews {
-  IncrementBookViews(this._repository);
+class IncrementBookViewsUseCase {
+	const IncrementBookViewsUseCase(this._repository);
 
-  final BooksRepository _repository;
+	final BooksRepository _repository;
 
-  Future<void> call(String bookId) {
-    return _repository.incrementBookViews(bookId);
-  }
+	Future<void> call({
+		required String bookId,
+		required String userId,
+	}) {
+		return _repository.addView(bookId: bookId, userId: userId);
+	}
 }

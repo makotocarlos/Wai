@@ -1,32 +1,36 @@
 import 'package:equatable/equatable.dart';
 
 class ChapterEntity extends Equatable {
-  final String title;
-  final String content;
-  final int order;
-  final bool isPublished;
+	const ChapterEntity({
+		required this.id,
+		required this.order,
+		required this.title,
+		required this.content,
+		this.isPublished = false,
+	});
 
-  const ChapterEntity({
-    required this.title,
-    required this.content,
-    required this.order,
-    this.isPublished = false,
-  });
+	final String id;
+	final int order;
+	final String title;
+	final String content;
+	final bool isPublished;
 
-  ChapterEntity copyWith({
-    String? title,
-    String? content,
-    int? order,
-    bool? isPublished,
-  }) {
-    return ChapterEntity(
-      title: title ?? this.title,
-      content: content ?? this.content,
-      order: order ?? this.order,
-      isPublished: isPublished ?? this.isPublished,
-    );
-  }
+	ChapterEntity copyWith({
+		String? id,
+		int? order,
+		String? title,
+		String? content,
+		bool? isPublished,
+	}) {
+		return ChapterEntity(
+			id: id ?? this.id,
+			order: order ?? this.order,
+			title: title ?? this.title,
+			content: content ?? this.content,
+			isPublished: isPublished ?? this.isPublished,
+		);
+	}
 
-  @override
-  List<Object?> get props => [title, content, order, isPublished];
+	@override
+	List<Object?> get props => [id, order, title, content, isPublished];
 }

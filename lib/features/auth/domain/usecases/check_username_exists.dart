@@ -1,11 +1,9 @@
 import '../repositories/auth_repository.dart';
 
-class CheckUsernameExists {
-  final AuthRepository repository;
+class CheckUsernameExistsUseCase {
+	const CheckUsernameExistsUseCase(this._repository);
 
-  CheckUsernameExists(this.repository);
+	final AuthRepository _repository;
 
-  Future<bool> call(String username) async {
-    return await repository.isUsernameTaken(username);
-  }
+	Future<bool> call(String username) => _repository.isUsernameTaken(username);
 }

@@ -1,39 +1,31 @@
-import 'dart:io';
-
+import '../entities/book_entity.dart';
 import '../entities/chapter_entity.dart';
 import '../repositories/books_repository.dart';
 
-class CreateBookParams {
-  CreateBookParams({
-    required this.title,
-    required this.category,
-    required this.chapters,
-    required this.publishedChapterOrder,
-    this.description,
-    this.coverFile,
-  });
+class CreateBookUseCase {
+	const CreateBookUseCase(this._repository);
 
-  final String title;
-  final String category;
-  final List<ChapterEntity> chapters;
-  final int publishedChapterOrder;
-  final String? description;
-  final File? coverFile;
-}
+	final BooksRepository _repository;
 
-class CreateBook {
-  CreateBook(this._repository);
-
-  final BooksRepository _repository;
-
-  Future<void> call(CreateBookParams params) {
-    return _repository.createBook(
-      title: params.title,
-      category: params.category,
-      chapters: params.chapters,
-      publishedChapterOrder: params.publishedChapterOrder,
-      description: params.description,
-      coverFile: params.coverFile,
-    );
-  }
+	Future<BookEntity> call({
+		required String authorId,
+		required String authorName,
+		required String title,
+		required String category,
+		required String description,
+		required List<ChapterEntity> chapters,
+		required int publishedChapterIndex,
+		String? coverPath,
+	}) {
+		return _repository.createBook(
+			authorId: authorId,
+			authorName: authorName,
+			title: title,
+			category: category,
+			description: description,
+			chapters: chapters,
+			publishedChapterIndex: publishedChapterIndex,
+			coverPath: coverPath,
+		);
+	}
 }

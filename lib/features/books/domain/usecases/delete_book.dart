@@ -1,11 +1,11 @@
 import '../repositories/books_repository.dart';
 
-class DeleteBook {
-  DeleteBook(this._repository);
+class DeleteBookUseCase {
+	const DeleteBookUseCase(this._repository);
 
-  final BooksRepository _repository;
+	final BooksRepository _repository;
 
-  Future<void> call(String bookId) {
-    return _repository.deleteBook(bookId);
-  }
+	Future<void> call({required String bookId}) {
+		return _repository.deleteBook(bookId: bookId);
+	}
 }

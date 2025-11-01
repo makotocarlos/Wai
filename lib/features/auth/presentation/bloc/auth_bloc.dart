@@ -1,182 +1,226 @@
-// lib/features/auth/presentation/bloc/auth_bloc.dart
 import 'dart:async';
 
-import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:firebase_auth/firebase_auth.dart' as fb;
-import '../../domain/usecases/sign_in.dart';
-import '../../domain/usecases/sign_in_with_google.dart';
-import '../../domain/usecases/sign_up.dart';
-import '../../domain/usecases/get_current_user.dart';
-import '../../domain/usecases/sign_out.dart';
-import '../../domain/usecases/watch_auth_state.dart';
+import 'package:bloc/bloc.dart';
+import 'package:equatable/equatable.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../../../../core/errors/email_confirmation_required_exception.dart';
 import '../../domain/entities/user_entity.dart';
-import 'auth_event.dart';
-import 'auth_state.dart';
+import '../../domain/usecases/get_current_user.dart';
+import '../../domain/usecases/send_password_reset.dart';
+import '../../domain/usecases/sign_in.dart';
+import '../../domain/usecases/sign_out.dart';
+import '../../domain/usecases/sign_up.dart';
+import '../../domain/usecases/watch_auth_state.dart';
+
+part 'auth_event.dart';
+part 'auth_state.dart';
 
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
-  final SignIn signIn;
-  final SignInWithGoogle signInWithGoogle;
-  final SignUp signUp;
-  final GetCurrentUser getCurrentUser;
-  final SignOut signOut; // <-- nuevo
-  final WatchAuthState watchAuthState;
-  StreamSubscription<UserEntity?>? _authSubscription;
+	AuthBloc({
+		required SignInUseCase signIn,
+		required SignUpUseCase signUp,
+		required SignOutUseCase signOut,
+		required WatchAuthStateUseCase watchAuthState,
+		required GetCurrentUserUseCase getCurrentUser,
+		required SendPasswordResetUseCase sendPasswordReset,
+	})  : _signIn = signIn,
+				_signUp = signUp,
+				_signOut = signOut,
+				_watchAuthState = watchAuthState,
+				_getCurrentUser = getCurrentUser,
+				_sendPasswordReset = sendPasswordReset,
+				super(const AuthState()) {
+		on<AuthInitialize>(_onInitialize);
+		on<AuthStatusChanged>(_onStatusChanged);
+		on<AuthSignInRequested>(_onSignInRequested);
+		on<AuthSignUpRequested>(_onSignUpRequested);
+		on<AuthSignOutRequested>(_onSignOutRequested);
+		on<AuthSendPasswordResetRequested>(_onSendPasswordResetRequested);
+	}
 
-  AuthBloc({
-    required this.signIn,
-    required this.signInWithGoogle,
-    required this.signUp,
-    required this.getCurrentUser,
-    required this.signOut,
-    required this.watchAuthState,
-  }) : super(AuthInitial()) {
-    on<AuthCheckRequested>(_onCheckRequested);
-    on<AuthStatusChanged>(_onStatusChanged);
-    on<SignInWithGoogleEvent>(_onGoogle);
-    on<SignInWithEmailEvent>(_onEmailSignIn);
-    on<SignUpWithEmailEvent>(_onEmailSignUp);
-    on<SignOutEvent>(_onSignOut);
+	final SignInUseCase _signIn;
+	final SignUpUseCase _signUp;
+	final SignOutUseCase _signOut;
+	final WatchAuthStateUseCase _watchAuthState;
+	final GetCurrentUserUseCase _getCurrentUser;
+	final SendPasswordResetUseCase _sendPasswordReset;
 
-    _authSubscription = watchAuthState().listen((user) {
-      add(AuthStatusChanged(user));
-    });
-  }
+	StreamSubscription<UserEntity?>? _subscription;
 
-  Future<void> _onCheckRequested(
-      AuthCheckRequested event, Emitter<AuthState> emit) async {
-    if (state is! Authenticated) {
-      emit(AuthLoading());
-    }
-    final user = getCurrentUser.call();
-    if (user != null) {
-      emit(Authenticated(user));
-    } else {
-      emit(Unauthenticated());
-    }
-  }
+	Future<void> _onInitialize(
+		AuthInitialize event,
+		Emitter<AuthState> emit,
+	) async {
+		emit(state.copyWith(status: AuthStatus.loading, clearError: true, clearInfo: true));
 
-  Future<void> _onStatusChanged(
-      AuthStatusChanged event, Emitter<AuthState> emit) async {
-    final user = event.user;
-    if (user != null) {
-      emit(Authenticated(user));
-    } else {
-      emit(Unauthenticated());
-    }
-  }
+		final current = _getCurrentUser();
+		if (current != null) {
+			emit(
+				state.copyWith(
+					status: AuthStatus.authenticated,
+					user: current,
+					clearError: true,
+					clearInfo: true,
+				),
+			);
+		} else {
+			emit(
+				state.copyWith(
+					status: AuthStatus.unauthenticated,
+					clearUser: true,
+					clearError: true,
+					clearInfo: true,
+				),
+			);
+		}
 
-  Future<void> _onGoogle(
-      SignInWithGoogleEvent event, Emitter<AuthState> emit) async {
-    emit(AuthLoading());
-    try {
-      final user = await signInWithGoogle.call();
-      String? infoMessage;
-      try {
-        final currentUser = fb.FirebaseAuth.instance.currentUser;
-        final creationTime = currentUser?.metadata.creationTime;
-        final lastSignInTime = currentUser?.metadata.lastSignInTime;
-        final isFirstSignIn =
-            creationTime != null && creationTime == lastSignInTime;
+		await _subscription?.cancel();
+		_subscription = _watchAuthState().listen(
+			(user) => add(AuthStatusChanged(user)),
+		);
+	}
 
-        if (isFirstSignIn && user.email != null && user.email!.isNotEmpty) {
-          final providers = (currentUser?.providerData ?? [])
-              .map((profile) => profile.providerId.toLowerCase())
-              .toSet();
+	void _onStatusChanged(
+		AuthStatusChanged event,
+		Emitter<AuthState> emit,
+	) {
+		if (event.user != null) {
+			emit(
+				state.copyWith(
+					status: AuthStatus.authenticated,
+					user: event.user,
+					clearError: true,
+					clearInfo: true,
+				),
+			);
+		} else {
+			emit(
+				state.copyWith(
+					status: AuthStatus.unauthenticated,
+					clearUser: true,
+					clearError: true,
+					clearInfo: true,
+				),
+			);
+		}
+	}
 
-          final hasPasswordProvider = providers.contains('password');
+	Future<void> _onSignInRequested(
+		AuthSignInRequested event,
+		Emitter<AuthState> emit,
+	) async {
+		emit(state.copyWith(status: AuthStatus.loading, clearError: true, clearInfo: true));
+		try {
+			await _signIn(event.email, event.password);
+		} on AuthException catch (error) {
+			emit(
+				state.copyWith(
+					status: AuthStatus.unauthenticated,
+					errorMessage: error.message,
+					clearInfo: true,
+				),
+			);
+		} catch (error) {
+			emit(
+				state.copyWith(
+					status: AuthStatus.unauthenticated,
+					errorMessage: 'Ocurrio un error al iniciar sesion.',
+					clearInfo: true,
+				),
+			);
+		}
+	}
 
-          if (!hasPasswordProvider) {
-            await fb.FirebaseAuth.instance
-                .sendPasswordResetEmail(email: user.email!);
-            infoMessage =
-                'Te enviamos un correo para que definas una contraseña y puedas entrar también con "Ya tengo una cuenta".';
-          }
-        }
-      } catch (e) {
-        infoMessage =
-            'Inicio con Google listo. Si quieres una contraseña, usa "¿Olvidaste tu contraseña?" y sigue el correo que te enviamos.';
-      }
+	Future<void> _onSignUpRequested(
+		AuthSignUpRequested event,
+		Emitter<AuthState> emit,
+	) async {
+		emit(state.copyWith(status: AuthStatus.loading, clearError: true, clearInfo: true));
+		try {
+			await _signUp(
+				event.email,
+				event.password,
+				username: event.username,
+			);
+		} on EmailConfirmationRequiredException catch (error) {
+			emit(
+				state.copyWith(
+					status: AuthStatus.unauthenticated,
+					infoMessage: error.message,
+					clearError: true,
+				),
+			);
+		} on AuthException catch (error) {
+			emit(
+				state.copyWith(
+					status: AuthStatus.unauthenticated,
+					errorMessage: error.message,
+					clearInfo: true,
+				),
+			);
+		} catch (error) {
+			emit(
+				state.copyWith(
+					status: AuthStatus.unauthenticated,
+					errorMessage: 'Ocurrio un error al registrar la cuenta.',
+					clearInfo: true,
+				),
+			);
+		}
+	}
 
-      emit(Authenticated(user, infoMessage: infoMessage));
-    } on fb.FirebaseAuthException catch (e) {
-      emit(AuthFailure(e.message ?? e.code));
-    } catch (e) {
-      emit(AuthFailure(e.toString().replaceAll('Exception: ', '')));
-    }
-  }
+	Future<void> _onSignOutRequested(
+		AuthSignOutRequested event,
+		Emitter<AuthState> emit,
+	) async {
+		emit(state.copyWith(status: AuthStatus.loading, clearError: true, clearInfo: true));
+		try {
+			await _signOut();
+		} catch (error) {
+			emit(
+				state.copyWith(
+					status: AuthStatus.unauthenticated,
+					errorMessage: 'No se pudo cerrar sesion. Intenta nuevamente.',
+					clearInfo: true,
+				),
+			);
+		}
+	}
 
-  Future<void> _onEmailSignIn(
-      SignInWithEmailEvent event, Emitter<AuthState> emit) async {
-    emit(AuthLoading());
-    try {
-      final user = await signIn.call(event.email, event.password);
-      emit(Authenticated(user));
-    } on fb.FirebaseAuthException catch (e) {
-      switch (e.code) {
-        case 'invalid-email':
-          emit(const AuthFailure('El correo no tiene un formato válido.'));
-          break;
-        case 'user-not-found':
-          emit(const AuthFailure('No existe una cuenta con ese correo.'));
-          break;
-        case 'wrong-password':
-        case 'invalid-credential':
-          emit(const AuthFailure(
-              'Correo o contraseña incorrectos. Si creaste la cuenta con Google, usa ese botón para entrar.'));
-          break;
-        case 'user-disabled':
-          emit(const AuthFailure('La cuenta está deshabilitada.'));
-          break;
-        default:
-          emit(AuthFailure(e.message ?? e.code));
-      }
-    } catch (e) {
-      emit(AuthFailure(e.toString().replaceAll('Exception: ', '')));
-    }
-  }
+	Future<void> _onSendPasswordResetRequested(
+		AuthSendPasswordResetRequested event,
+		Emitter<AuthState> emit,
+	) async {
+		emit(state.copyWith(clearError: true, clearInfo: true));
+		try {
+			await _sendPasswordReset(event.email);
+			emit(
+				state.copyWith(
+					infoMessage: 'Te enviamos un correo para restablecer la contrasena.',
+					clearError: true,
+				),
+			);
+		} on AuthException catch (error) {
+			emit(
+				state.copyWith(
+					errorMessage: error.message,
+					clearInfo: true,
+				),
+			);
+		} catch (error) {
+			emit(
+				state.copyWith(
+					errorMessage: 'No se pudo enviar el correo de recuperacion.',
+					clearInfo: true,
+				),
+			);
+		}
+	}
 
-  Future<void> _onEmailSignUp(
-      SignUpWithEmailEvent event, Emitter<AuthState> emit) async {
-    emit(AuthLoading());
-
-    try {
-      final user = await signUp.call(
-        email: event.email,
-        password: event.password,
-        username: event.username,
-      );
-
-      emit(Authenticated(
-        user,
-        infoMessage:
-            'Te enviamos un correo para que verifiques tu dirección antes de comenzar.',
-      ));
-    } on fb.FirebaseAuthException catch (e) {
-      if (e.code == 'weak-password') {
-        emit(AuthFailure('La contraseña es muy débil'));
-      } else if (e.code == 'email-already-in-use') {
-        emit(AuthFailure('El correo ya está en uso'));
-      } else {
-        emit(AuthFailure(e.message ?? e.code));
-      }
-    } catch (e) {
-      emit(AuthFailure(e.toString().replaceAll('Exception: ', '')));
-    }
-  }
-
-  Future<void> _onSignOut(SignOutEvent event, Emitter<AuthState> emit) async {
-    emit(AuthLoading());
-    try {
-      await signOut.call();
-      emit(Unauthenticated());
-    } catch (e) {
-      emit(AuthFailure('Error al cerrar sesión: ${e.toString()}'));
-    }
-  }
-
-  @override
-  Future<void> close() {
-    _authSubscription?.cancel();
-    return super.close();
-  }
+	@override
+	Future<void> close() async {
+		await _subscription?.cancel();
+		return super.close();
+	}
 }
