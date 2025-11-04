@@ -26,4 +26,9 @@ abstract class ChatRepository {
     required String messageId,
     required String senderId,
   });
+
+  Future<ChatThreadEntity?> getThreadById({
+    required String userId,
+    required String threadId,
+  });
 }

@@ -1,4 +1,5 @@
 import '../entities/book_entity.dart';
+import '../entities/book_search_sort.dart';
 import '../entities/chapter_entity.dart';
 import '../entities/comment_entity.dart';
 
@@ -45,6 +46,16 @@ abstract class BooksRepository {
 		required String bookId,
 		required CommentEntity comment,
 	});
+
+	Future<List<BookEntity>> searchBooks({
+		String? query,
+		String? category,
+		BookSearchSort sortBy,
+		int limit,
+		String? currentUserId,
+	});
+
+	Future<List<String>> fetchCategories();
 
 	/// Responder a un comentario existente (YouTube-style)
 	Future<void> replyToComment({

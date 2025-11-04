@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -11,10 +12,15 @@ import '../../features/books/domain/usecases/watch_books.dart';
 import '../../features/books/presentation/cubit/book_list_cubit.dart';
 import '../../features/books/presentation/cubit/book_list_state.dart';
 import '../../features/books/presentation/pages/book_detail_page.dart';
+import '../../features/notifications/presentation/cubit/notifications_cubit.dart';
+import '../../features/notifications/presentation/cubit/notifications_state.dart';
+import '../../features/notifications/presentation/pages/notifications_page.dart';
 import '../profile/profile_screen.dart';
 import '../write/writing_dashboard.dart';
 import 'library_screen.dart';
 import 'search_screen.dart';
+import '../../services/notification/notification_preferences.dart';
+import '../../services/notification/push_notifications_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -27,11 +33,108 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
+  late final NotificationsCubit _notificationsCubit;
+  StreamSubscription<NotificationsState>? _notificationsSubscription;
+  int _unreadNotifications = 0;
+  late final NotificationsPage _notificationsPage;
+  late final PushNotificationsService _pushNotificationsService;
+
+  @override
+  void initState() {
+    super.initState();
+    _notificationsCubit = sl<NotificationsCubit>();
+    _notificationsCubit.start();
+    _notificationsSubscription = _notificationsCubit.stream.listen((state) {
+      final unread = state.notifications.where((item) => !item.isRead).length;
+      if (unread != _unreadNotifications) {
+        setState(() {
+          _unreadNotifications = unread;
+        });
+      }
+    });
+    _notificationsPage = NotificationsPage(cubit: _notificationsCubit);
+    _pushNotificationsService = sl<PushNotificationsService>()..initialize();
+    NotificationPreferences.isPushEnabled().then((enabled) {
+      if (!enabled) {
+        return;
+      }
+      _pushNotificationsService.syncTokenIfAuthorized();
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _maybePromptForPushNotifications();
+    });
+  }
+
+  @override
+  void dispose() {
+    _notificationsSubscription?.cancel();
+    _notificationsCubit.close();
+    super.dispose();
+  }
 
   void _onItemTapped(int index) {
     setState(() {
       _currentIndex = index;
     });
+  }
+
+  Future<void> _maybePromptForPushNotifications() async {
+    final alreadyPrompted = await NotificationPreferences.isPromptShown();
+    if (alreadyPrompted || !mounted) {
+      return;
+    }
+
+    final enablePush = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            title: const Text('¿Activar notificaciones push?'),
+            content: const Text(
+              'Podemos avisarte en tu teléfono cuando recibas mensajes, nuevos seguidores o capítulos en tus favoritos. '
+              '¿Quieres activar las notificaciones push?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Solo en la app'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Activar'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    await NotificationPreferences.setPromptShown();
+    if (!enablePush) {
+      await NotificationPreferences.setPushEnabled(false);
+      await _pushNotificationsService.disablePushNotifications();
+      return;
+    }
+
+    final granted = await _pushNotificationsService.enablePushNotifications();
+    await NotificationPreferences.setPushEnabled(granted);
+
+    if (!mounted) {
+      return;
+    }
+
+    if (granted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Notificaciones push activadas.')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No pudimos activar las notificaciones push. Revisa los permisos del sistema.',
+          ),
+        ),
+      );
+    }
   }
 
   List<_TabItem> _buildTabs(BuildContext context, UserEntity? user) {
@@ -45,6 +148,17 @@ class _HomeScreenState extends State<HomeScreen> {
         title: 'Buscar',
         icon: Icons.search_rounded,
         builder: (_) => const SearchScreen(),
+      ),
+      _TabItem(
+        title: 'Notificaciones',
+        icon: Icons.notifications_outlined,
+        activeIcon: Icons.notifications,
+        isNotifications: true,
+        builder: (_) => user == null
+            ? const _PlaceholderView(
+                'Inicia sesión para ver tus notificaciones.',
+              )
+            : _notificationsPage,
       ),
       _TabItem(
         title: 'Biblioteca',
@@ -126,12 +240,57 @@ class _HomeScreenState extends State<HomeScreen> {
         items: tabs
             .map(
               (tab) => BottomNavigationBarItem(
-                icon: Icon(tab.icon),
+                icon: _buildTabIcon(context, tab, isActive: false),
+                activeIcon: _buildTabIcon(context, tab, isActive: true),
                 label: tab.title,
               ),
             )
             .toList(),
       ),
+    );
+  }
+
+  Widget _buildTabIcon(BuildContext context, _TabItem tab,
+      {required bool isActive}) {
+    final iconData = isActive && tab.activeIcon != null
+        ? tab.activeIcon!
+        : tab.icon;
+    final icon = Icon(iconData);
+
+    if (!tab.isNotifications || _unreadNotifications == 0) {
+      return icon;
+    }
+
+    final badgeLabel = _unreadNotifications > 99
+        ? '99+'
+        : '$_unreadNotifications';
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        icon,
+        Positioned(
+          right: -8,
+          top: -4,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.error,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+            child: Text(
+              badgeLabel,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -141,11 +300,15 @@ class _TabItem {
     required this.title,
     required this.icon,
     required this.builder,
+    this.activeIcon,
+    this.isNotifications = false,
   });
 
   final String title;
   final IconData icon;
+  final IconData? activeIcon;
   final WidgetBuilder builder;
+  final bool isNotifications;
 }
 
 class _FeedView extends StatefulWidget {

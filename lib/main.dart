@@ -1,5 +1,9 @@
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'core/di/injection.dart';
 import 'core/supabase/supabase_service.dart';
@@ -9,10 +13,28 @@ import 'features/auth/presentation/pages/login_page.dart';
 import 'features/auth/presentation/pages/register_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'shared/theme/app_theme.dart';
+import 'firebase_options.dart';
 
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await dotenv.load(fileName: '.env');
+  } catch (error) {
+    if (kDebugMode) {
+      debugPrint('No se pudo cargar .env, continuamos con dart-define: $error');
+    }
+  }
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  if (!kIsWeb) {
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  }
   final client = await SupabaseService.initialize();
 
   if (client == null) {

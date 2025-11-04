@@ -7,6 +7,7 @@ import '../../data/repositories_impl/draft_repository.dart';
 import '../../domain/entities/chapter_entity.dart';
 import '../../domain/usecases/create_book.dart';
 import 'book_form_state.dart';
+import 'chapter_ai_state.dart';
 
 class BookFormCubit extends Cubit<BookFormState> {
   BookFormCubit({
@@ -129,6 +130,30 @@ class BookFormCubit extends Cubit<BookFormState> {
       title: title ?? chapters[index].title,
       content: content ?? chapters[index].content,
     );
+    emit(state.copyWith(chapters: chapters));
+    _autoSaveDraft();
+  }
+
+  void updateChapterChat(
+    int index, {
+    List<ChapterAiMessage>? messages,
+    List<String>? ideas,
+    List<String>? nextSteps,
+  }) {
+    final chapters = [...state.chapters];
+    if (index < 0 || index >= chapters.length) return;
+
+    chapters[index] = chapters[index].copyWith(
+      chatHistory: messages != null
+          ? List<ChapterAiMessage>.from(messages)
+          : chapters[index].chatHistory,
+      chatIdeas:
+          ideas != null ? List<String>.from(ideas) : chapters[index].chatIdeas,
+      chatNextSteps: nextSteps != null
+          ? List<String>.from(nextSteps)
+          : chapters[index].chatNextSteps,
+    );
+
     emit(state.copyWith(chapters: chapters));
     _autoSaveDraft();
   }

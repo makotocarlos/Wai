@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../domain/entities/book_entity.dart';
+import '../../domain/entities/book_search_sort.dart';
 import '../../domain/entities/chapter_entity.dart';
 import '../../domain/entities/comment_entity.dart';
 import '../../domain/repositories/books_repository.dart';
@@ -245,9 +246,8 @@ class SupabaseBooksRepository implements BooksRepository {
         return <BookEntity>[];
       }
 
-      final favoriteRows = rows
-          .where((row) => row['book_id'] != null)
-          .toList(growable: false);
+      final favoriteRows =
+          rows.where((row) => row['book_id'] != null).toList(growable: false);
 
       if (favoriteRows.isEmpty) {
         return <BookEntity>[];
@@ -257,10 +257,8 @@ class SupabaseBooksRepository implements BooksRepository {
           .map((row) => row['book_id'] as String)
           .toList(growable: false);
 
-      final booksResponse = await _client
-          .from(_booksTable)
-          .select('*')
-          .inFilter('id', bookIds);
+      final booksResponse =
+          await _client.from(_booksTable).select('*').inFilter('id', bookIds);
 
       final books = await Future.wait(
         booksResponse.map(
@@ -318,6 +316,105 @@ class SupabaseBooksRepository implements BooksRepository {
       'created_at': reply.createdAt.toIso8601String(),
       'parent_comment_id': parentCommentId, // FK al comentario padre
     });
+  }
+
+  @override
+  Future<List<BookEntity>> searchBooks({
+    String? query,
+    String? category,
+    BookSearchSort sortBy = BookSearchSort.recent,
+    int limit = 40,
+    String? currentUserId,
+  }) async {
+    final sanitizedLimit = limit <= 0 ? 20 : limit;
+    final fetchLimit = sortBy == BookSearchSort.recent
+        ? sanitizedLimit
+        : (sanitizedLimit * 3).clamp(sanitizedLimit, 200).toInt();
+
+    try {
+      var request = _client.from(_booksTable).select();
+
+      final normalizedCategory = category?.trim();
+      if (normalizedCategory != null && normalizedCategory.isNotEmpty) {
+        final categoryPattern = _escapeIlikePattern(normalizedCategory);
+        request = request.ilike('category', categoryPattern);
+      }
+
+      final sanitizedQuery = query?.trim();
+      if (sanitizedQuery != null && sanitizedQuery.isNotEmpty) {
+        final escaped = _escapeIlikePattern(sanitizedQuery);
+        final pattern = '%$escaped%';
+        request = request.or(
+          'title.ilike.$pattern,author_name.ilike.$pattern,category.ilike.$pattern',
+        );
+      }
+
+      final rows =
+          await request.order('created_at', ascending: false).limit(fetchLimit);
+
+      final books = await Future.wait(
+        rows.map(
+          (row) => _mapRowToBook(
+            row,
+            currentUserId: currentUserId,
+            loadChapters: false,
+          ),
+        ),
+      );
+
+      final sorted = List<BookEntity>.from(books);
+
+      switch (sortBy) {
+        case BookSearchSort.recent:
+          sorted.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+          break;
+        case BookSearchSort.mostViewed:
+          sorted.sort((a, b) => b.viewCount.compareTo(a.viewCount));
+          break;
+        case BookSearchSort.mostLiked:
+          sorted.sort((a, b) => b.likeCount.compareTo(a.likeCount));
+          break;
+      }
+
+      if (sorted.length > sanitizedLimit) {
+        return sorted.take(sanitizedLimit).toList(growable: false);
+      }
+
+      return sorted;
+    } catch (e) {
+      throw Exception('Error searching books: $e');
+    }
+  }
+
+  @override
+  Future<List<String>> fetchCategories() async {
+    try {
+      final rows = await _client
+          .from(_booksTable)
+          .select('category')
+          .not('category', 'is', null);
+
+      if (rows.isEmpty) {
+        return <String>[];
+      }
+
+      final Map<String, String> normalized = {};
+
+      for (final dynamic row in rows) {
+        final data = row as Map<String, dynamic>;
+        final raw = (data['category'] as String?)?.trim();
+        if (raw == null || raw.isEmpty) {
+          continue;
+        }
+        final key = raw.toLowerCase();
+        normalized.putIfAbsent(key, () => raw);
+      }
+
+      final keys = normalized.keys.toList()..sort();
+      return keys.map((key) => normalized[key]!).toList(growable: false);
+    } catch (e) {
+      throw Exception('Error fetching categories: $e');
+    }
   }
 
   @override
@@ -425,9 +522,9 @@ class SupabaseBooksRepository implements BooksRepository {
     final BookReactionType? userReaction = currentUserId == null
         ? null
         : await _fetchUserReaction(bookId, currentUserId);
-  final bool isFavorited = currentUserId == null
-    ? false
-    : await _isBookFavorited(bookId, currentUserId);
+    final bool isFavorited = currentUserId == null
+        ? false
+        : await _isBookFavorited(bookId, currentUserId);
 
     return BookEntity(
       id: bookId,
@@ -447,6 +544,13 @@ class SupabaseBooksRepository implements BooksRepository {
       favoritesCount: metrics.favoriteCount,
       isFavorited: isFavorited,
     );
+  }
+
+  String _escapeIlikePattern(String value) {
+    return value
+        .replaceAll('\\', '\\\\')
+        .replaceAll('%', '\\%')
+        .replaceAll('_', '\\_');
   }
 
   Future<List<ChapterEntity>> _fetchChapters(String bookId) async {
@@ -482,10 +586,10 @@ class SupabaseBooksRepository implements BooksRepository {
         .select('reaction')
         .eq('book_id', bookId);
 
-  final favorites = await _client
-    .from(_favoritesTable)
-    .select('user_id')
-    .eq('book_id', bookId);
+    final favorites = await _client
+        .from(_favoritesTable)
+        .select('user_id')
+        .eq('book_id', bookId);
 
     int likes = 0;
     int dislikes = 0;

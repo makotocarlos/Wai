@@ -148,6 +148,20 @@ class SupabaseChatRepository implements ChatRepository {
   }
 
   @override
+  Future<ChatThreadEntity?> getThreadById({
+    required String userId,
+    required String threadId,
+  }) async {
+    final threads = await _fetchThreads(userId);
+    for (final thread in threads) {
+      if (thread.id == threadId) {
+        return thread;
+      }
+    }
+    return null;
+  }
+
+  @override
   Future<void> sendMessage({
     required String threadId,
     required String senderId,
@@ -283,6 +297,20 @@ class SupabaseChatRepository implements ChatRepository {
   }
 
   Future<List<ChatThreadEntity>> _fetchThreads(String userId) async {
+    final participantRows = await _client
+        .from(_participantsTable)
+        .select('thread_id')
+        .eq('profile_id', userId);
+
+    if (participantRows.isEmpty) {
+      return const <ChatThreadEntity>[];
+    }
+
+    final threadIds = participantRows
+        .map<String>((dynamic row) => row['thread_id'] as String)
+        .toSet()
+        .toList(growable: false);
+
     final response = await _client
         .from(_threadsTable)
         .select('''
@@ -301,17 +329,17 @@ class SupabaseChatRepository implements ChatRepository {
             )
           )
         ''')
-        .eq('direct_thread_participants.profile_id', userId)
-  .order('last_message_at', ascending: false, nullsFirst: false)
+        .inFilter('id', threadIds)
+        .order('last_message_at', ascending: false, nullsFirst: false)
         .order('created_at', ascending: false);
 
     return response.map<ChatThreadEntity>((dynamic row) {
       final data = row as Map<String, dynamic>;
-    final participantsData =
-      (data['direct_thread_participants'] as List<dynamic>? ?? const [])
-        .map((dynamic participantRow) {
-    final participant = participantRow as Map<String, dynamic>;
-    final profile = participant['profile'] as Map<String, dynamic>;
+      final participantsData =
+          (data['direct_thread_participants'] as List<dynamic>? ?? const [])
+              .map((dynamic participantRow) {
+        final participant = participantRow as Map<String, dynamic>;
+        final profile = participant['profile'] as Map<String, dynamic>;
         return ChatParticipantEntity(
           id: profile['id'] as String,
           username: (profile['username'] as String?) ?? 'Usuario',
@@ -340,7 +368,7 @@ class SupabaseChatRepository implements ChatRepository {
         updatedAt: data['updated_at'] == null
             ? null
             : DateTime.parse(data['updated_at'] as String),
-  participants: participantsData,
+        participants: participantsData,
         preview: preview,
       );
     }).toList(growable: false);

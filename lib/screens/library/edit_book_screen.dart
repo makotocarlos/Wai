@@ -10,6 +10,7 @@ import '../../features/books/domain/entities/chapter_entity.dart';
 import '../../features/books/domain/usecases/update_book.dart';
 import '../../features/books/presentation/cubit/book_form_cubit.dart';
 import '../../features/books/presentation/cubit/book_form_state.dart';
+import '../../features/books/presentation/cubit/chapter_ai_cubit.dart';
 import '../write/publish_book_screen.dart';
 
 class EditBookScreen extends StatefulWidget {
@@ -81,8 +82,15 @@ class _EditBookScreenState extends State<EditBookScreen> {
   }) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => BlocProvider.value(
-          value: context.read<BookFormCubit>(),
+        builder: (_) => MultiBlocProvider(
+          providers: [
+            BlocProvider.value(
+              value: context.read<BookFormCubit>(),
+            ),
+            BlocProvider(
+              create: (_) => sl<ChapterAiCubit>(),
+            ),
+          ],
           child: ChapterEditorScreen(index: index, draft: chapter),
         ),
       ),

@@ -22,9 +22,10 @@ import 'chapter_reader_page.dart';
 import 'package:wappa_app/screens/profile/profile_screen.dart';
 
 class BookDetailPage extends StatelessWidget {
-	const BookDetailPage({super.key, required this.bookId});
+	const BookDetailPage({super.key, required this.bookId, this.highlightCommentId});
 
 	final String bookId;
+	final String? highlightCommentId;
 
 	@override
 	Widget build(BuildContext context) {
@@ -52,13 +53,15 @@ class BookDetailPage extends StatelessWidget {
 				bookId: bookId,
 				user: user,
 			),
-			child: const _BookDetailView(),
+			child: _BookDetailView(highlightCommentId: highlightCommentId),
 		);
 	}
 }
 
 class _BookDetailView extends StatelessWidget {
-	const _BookDetailView();
+	const _BookDetailView({this.highlightCommentId});
+
+	final String? highlightCommentId;
 
 	@override
 	Widget build(BuildContext context) {
@@ -120,6 +123,7 @@ class _BookDetailView extends StatelessWidget {
 									bookId: book.id,
 									comments: state.comments,
 									isLoading: state.commentsLoading,
+									highlightCommentId: highlightCommentId,
 								),
 								const SizedBox(height: 24),
 							],
@@ -477,11 +481,13 @@ class _CommentsSection extends StatefulWidget {
 		required this.bookId,
 		required this.comments,
 		required this.isLoading,
+		this.highlightCommentId,
 	});
 
 	final String bookId;
 	final List<CommentEntity> comments;
 	final bool isLoading;
+	final String? highlightCommentId;
 
 	@override
 	State<_CommentsSection> createState() => _CommentsSectionState();
@@ -491,12 +497,29 @@ class _CommentsSectionState extends State<_CommentsSection> {
 	final _controller = TextEditingController();
 	final _focusNode = FocusNode();
 	bool _showAllComments = false; // Control para mostrar todos los comentarios
+	final Map<String, GlobalKey> _commentKeys = {};
+	bool _didScrollToHighlight = false;
 
 	@override
 	void dispose() {
 		_controller.dispose();
 		_focusNode.dispose();
 		super.dispose();
+	}
+
+	@override
+	void initState() {
+		super.initState();
+		_showAllComments = widget.highlightCommentId != null;
+	}
+
+	@override
+	void didUpdateWidget(covariant _CommentsSection oldWidget) {
+		super.didUpdateWidget(oldWidget);
+		if (widget.highlightCommentId != oldWidget.highlightCommentId) {
+			_showAllComments = widget.highlightCommentId != null;
+			_didScrollToHighlight = false;
+		}
 	}
 
 	void _submitComment() {
@@ -508,9 +531,46 @@ class _CommentsSectionState extends State<_CommentsSection> {
 		_focusNode.unfocus();
 	}
 
+	String? _findRootCommentId(List<CommentEntity> comments, String targetId) {
+		for (final comment in comments) {
+			if (comment.id == targetId) {
+				return comment.id;
+			}
+			final nested = _findRootCommentId(comment.replies, targetId);
+			if (nested != null) {
+				return comment.id;
+			}
+		}
+		return null;
+	}
+
+	void _scheduleHighlightScroll() {
+		if (_didScrollToHighlight || widget.highlightCommentId == null) {
+			return;
+		}
+		final rootId = _findRootCommentId(
+			widget.comments,
+			widget.highlightCommentId!,
+		);
+		if (rootId == null) {
+			return;
+		}
+		final key = _commentKeys[rootId];
+		if (key?.currentContext == null) {
+			return;
+		}
+		_didScrollToHighlight = true;
+		Scrollable.ensureVisible(
+			key!.currentContext!,
+			duration: const Duration(milliseconds: 350),
+			curve: Curves.easeInOut,
+		);
+	}
+
 	@override
 	Widget build(BuildContext context) {
 		final theme = Theme.of(context);
+		WidgetsBinding.instance.addPostFrameCallback((_) => _scheduleHighlightScroll());
 
 		return Column(
 			crossAxisAlignment: CrossAxisAlignment.start,
@@ -616,7 +676,17 @@ class _CommentsSectionState extends State<_CommentsSection> {
 						separatorBuilder: (_, __) => const SizedBox(height: 12),
 						itemBuilder: (context, index) {
 							final comment = widget.comments[index];
-							return _CommentCard(comment: comment);
+							final key = _commentKeys.putIfAbsent(
+								comment.id,
+								() => GlobalKey(),
+							);
+							return KeyedSubtree(
+								key: key,
+								child: _CommentCard(
+									comment: comment,
+									highlightCommentId: widget.highlightCommentId,
+								),
+							);
 						},
 					),
 					// Botón "Ver más" si hay más de 1 comentario
@@ -654,9 +724,10 @@ class _CommentsSectionState extends State<_CommentsSection> {
 }
 
 class _CommentCard extends StatefulWidget {
-	const _CommentCard({required this.comment});
+	const _CommentCard({required this.comment, this.highlightCommentId});
 
 	final CommentEntity comment;
+	final String? highlightCommentId;
 
 	@override
 	State<_CommentCard> createState() => _CommentCardState();
@@ -667,10 +738,48 @@ class _CommentCardState extends State<_CommentCard> {
 	bool _showReplies = false;
 	final _replyController = TextEditingController();
 
+	bool get _isHighlighted =>
+		widget.highlightCommentId != null &&
+		widget.highlightCommentId == widget.comment.id;
+
+	bool get _hasHighlightedReply => widget.highlightCommentId != null &&
+		_containsReply(widget.comment.replies, widget.highlightCommentId!);
+
 	@override
 	void dispose() {
 		_replyController.dispose();
 		super.dispose();
+	}
+
+	@override
+	void initState() {
+		super.initState();
+		if (_hasHighlightedReply) {
+			_showReplies = true;
+		}
+	}
+
+	@override
+	void didUpdateWidget(covariant _CommentCard oldWidget) {
+		super.didUpdateWidget(oldWidget);
+		if (widget.highlightCommentId != oldWidget.highlightCommentId &&
+			_hasHighlightedReply) {
+			setState(() {
+				_showReplies = true;
+			});
+		}
+	}
+
+	bool _containsReply(List<CommentEntity> replies, String targetId) {
+		for (final reply in replies) {
+			if (reply.id == targetId) {
+				return true;
+			}
+			if (_containsReply(reply.replies, targetId)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	void _toggleReplyField() {
@@ -713,12 +822,19 @@ class _CommentCardState extends State<_CommentCard> {
 	Widget build(BuildContext context) {
 		final theme = Theme.of(context);
 		final timeAgo = _formatTimeAgo(widget.comment.createdAt);
+		final baseBackground = theme.colorScheme.surface;
+		final highlightBackground = theme.colorScheme.primary.withOpacity(0.18);
+		final backgroundColor = _isHighlighted ? highlightBackground : baseBackground;
+		final border = _isHighlighted
+			? Border.all(color: theme.colorScheme.primary, width: 1.2)
+			: null;
 
 		return Container(
 			padding: const EdgeInsets.all(12),
 			decoration: BoxDecoration(
-				color: theme.colorScheme.surface,
+				color: backgroundColor,
 				borderRadius: BorderRadius.circular(12),
+				border: border,
 			),
 			child: Column(
 				crossAxisAlignment: CrossAxisAlignment.start,
@@ -887,7 +1003,10 @@ class _CommentCardState extends State<_CommentCard> {
 								children: widget.comment.replies
 									.map((reply) => Padding(
 										padding: const EdgeInsets.only(bottom: 8),
-										child: _ReplyCard(reply: reply),
+										child: _ReplyCard(
+											reply: reply,
+											highlightCommentId: widget.highlightCommentId,
+										),
 									))
 									.toList(),
 							),
@@ -915,20 +1034,29 @@ class _CommentCardState extends State<_CommentCard> {
 }
 
 class _ReplyCard extends StatelessWidget {
-	const _ReplyCard({required this.reply});
+	const _ReplyCard({required this.reply, this.highlightCommentId});
 
 	final CommentEntity reply;
+	final String? highlightCommentId;
 
 	@override
 	Widget build(BuildContext context) {
 		final theme = Theme.of(context);
 		final timeAgo = _formatTimeAgo(reply.createdAt);
+		final isHighlighted = highlightCommentId != null && highlightCommentId == reply.id;
+		final background = isHighlighted
+			? theme.colorScheme.primary.withOpacity(0.18)
+			: theme.colorScheme.surface.withOpacity(0.5);
+		final border = isHighlighted
+			? Border.all(color: theme.colorScheme.primary, width: 1)
+			: null;
 
 		return Container(
 			padding: const EdgeInsets.all(8),
 			decoration: BoxDecoration(
-				color: theme.colorScheme.surface.withOpacity(0.5),
+				color: background,
 				borderRadius: BorderRadius.circular(8),
+				border: border,
 			),
 			child: Row(
 				crossAxisAlignment: CrossAxisAlignment.start,

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -18,10 +20,14 @@ class ChapterReaderPage extends StatefulWidget {
     super.key,
     required this.book,
     this.initialChapterIndex = 0,
+    this.targetChapterId,
+    this.targetCommentId,
   });
 
   final BookEntity book;
   final int initialChapterIndex;
+  final String? targetChapterId;
+  final String? targetCommentId;
 
   @override
   State<ChapterReaderPage> createState() => _ChapterReaderPageState();
@@ -30,12 +36,20 @@ class ChapterReaderPage extends StatefulWidget {
 class _ChapterReaderPageState extends State<ChapterReaderPage> {
   late final PageController _pageController;
   late int _currentIndex;
+  String? _pendingChapterId;
+  String? _pendingCommentId;
+  bool _isOpeningModal = false;
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialChapterIndex;
     _pageController = PageController(initialPage: _currentIndex);
+    _pendingChapterId = widget.targetChapterId;
+    _pendingCommentId = widget.targetCommentId;
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => unawaited(_openPendingCommentIfNeeded()),
+    );
   }
 
   @override
@@ -58,6 +72,7 @@ class _ChapterReaderPageState extends State<ChapterReaderPage> {
     setState(() {
       _currentIndex = index;
     });
+    unawaited(_openPendingCommentIfNeeded());
   }
 
   void _goToPreviousChapter() {
@@ -77,6 +92,93 @@ class _ChapterReaderPageState extends State<ChapterReaderPage> {
         curve: Curves.easeInOut,
       );
     }
+  }
+
+  Future<void> _openPendingCommentIfNeeded() async {
+    if (!mounted || _pendingCommentId == null) {
+      return;
+    }
+
+    final chapters = _publishedChapters;
+    if (chapters.isEmpty) {
+      return;
+    }
+
+    final desiredChapterId =
+        _pendingChapterId ?? chapters[_currentIndex].id;
+    final targetIndex = chapters.indexWhere((c) => c.id == desiredChapterId);
+    if (targetIndex == -1) {
+      _pendingChapterId = null;
+      _pendingCommentId = null;
+      return;
+    }
+
+    if (_currentIndex != targetIndex) {
+      _currentIndex = targetIndex;
+      _pageController.jumpToPage(targetIndex);
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => unawaited(_openPendingCommentIfNeeded()),
+      );
+      return;
+    }
+
+    if (_isOpeningModal) {
+      return;
+    }
+
+    final user = context.read<AuthBloc>().state.user;
+    if (user == null) {
+      _pendingChapterId = null;
+      _pendingCommentId = null;
+      return;
+    }
+
+    _isOpeningModal = true;
+    final chapterId = chapters[targetIndex].id;
+    final cubit = ChapterCommentsCubit(
+      watchChapterComments: sl<WatchChapterCommentsUseCase>(),
+      addChapterComment: sl<AddChapterCommentUseCase>(),
+      replyToChapterComment: sl<ReplyToChapterCommentUseCase>(),
+      repository: sl<BooksRepository>(),
+      chapterId: chapterId,
+      user: user,
+    );
+
+    await _showCommentsModal(
+      context: context,
+      chapterId: chapterId,
+      commentsCubit: cubit,
+      highlightCommentId: _pendingCommentId,
+    );
+    await cubit.close();
+
+    if (!mounted) {
+      return;
+    }
+
+    _isOpeningModal = false;
+    _pendingChapterId = null;
+    _pendingCommentId = null;
+  }
+
+  Future<void> _showCommentsModal({
+    required BuildContext context,
+    required String chapterId,
+    required ChapterCommentsCubit commentsCubit,
+    String? highlightCommentId,
+  }) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => BlocProvider.value(
+        value: commentsCubit,
+        child: _CommentsModalContent(
+          chapterId: chapterId,
+          highlightCommentId: highlightCommentId,
+        ),
+      ),
+    );
   }
 
   @override
@@ -116,6 +218,14 @@ class _ChapterReaderPageState extends State<ChapterReaderPage> {
             onNext: _goToNextChapter,
             hasPrevious: index > 0,
             hasNext: index < publishedChapters.length - 1,
+            showCommentsModal: ({required ChapterCommentsCubit cubit, String? highlightCommentId}) {
+              return _showCommentsModal(
+                context: context,
+                chapterId: chap.id,
+                commentsCubit: cubit,
+                highlightCommentId: highlightCommentId,
+              );
+            },
           );
         },
       ),
@@ -132,6 +242,7 @@ class _ChapterContent extends StatelessWidget {
     required this.onNext,
     required this.hasPrevious,
     required this.hasNext,
+    required this.showCommentsModal,
   });
 
   final BookEntity book;
@@ -141,6 +252,10 @@ class _ChapterContent extends StatelessWidget {
   final VoidCallback onNext;
   final bool hasPrevious;
   final bool hasNext;
+  final Future<void> Function({
+    required ChapterCommentsCubit cubit,
+    String? highlightCommentId,
+  }) showCommentsModal;
 
   @override
   Widget build(BuildContext context) {
@@ -221,10 +336,8 @@ class _ChapterContent extends StatelessWidget {
                         final commentsCubit =
                             context.read<ChapterCommentsCubit>();
                         return OutlinedButton.icon(
-                          onPressed: () => _showCommentsModal(
-                            context,
-                            chapterId,
-                            commentsCubit,
+                          onPressed: () => showCommentsModal(
+                            cubit: commentsCubit,
                           ),
                           icon: const Icon(Icons.comment_outlined, size: 18),
                           label: state.isLoading
@@ -302,29 +415,14 @@ class _ChapterContent extends StatelessWidget {
       ),
     );
   }
-
-  void _showCommentsModal(
-    BuildContext context,
-    String chapterId,
-    ChapterCommentsCubit commentsCubit,
-  ) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => BlocProvider.value(
-        value: commentsCubit,
-        child: _CommentsModalContent(chapterId: chapterId),
-      ),
-    );
-  }
 }
 
 // Modal de comentarios del capitulo
 class _CommentsModalContent extends StatefulWidget {
-  const _CommentsModalContent({required this.chapterId});
+  const _CommentsModalContent({required this.chapterId, this.highlightCommentId});
 
   final String chapterId;
+  final String? highlightCommentId;
 
   @override
   State<_CommentsModalContent> createState() => _CommentsModalContentState();
@@ -334,6 +432,23 @@ class _CommentsModalContentState extends State<_CommentsModalContent> {
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
   bool _showAllComments = false;
+  final Map<String, GlobalKey> _commentKeys = {};
+  bool _didScrollToHighlight = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _showAllComments = widget.highlightCommentId != null;
+  }
+
+  @override
+  void didUpdateWidget(covariant _CommentsModalContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.highlightCommentId != oldWidget.highlightCommentId) {
+      _showAllComments = widget.highlightCommentId != null;
+      _didScrollToHighlight = false;
+    }
+  }
 
   @override
   void dispose() {
@@ -349,6 +464,39 @@ class _CommentsModalContentState extends State<_CommentsModalContent> {
     context.read<ChapterCommentsCubit>().addComment(text);
     _controller.clear();
     _focusNode.unfocus();
+  }
+
+  String? _findRootCommentId(List<CommentEntity> comments, String targetId) {
+    for (final comment in comments) {
+      if (comment.id == targetId) {
+        return comment.id;
+      }
+      final nested = _findRootCommentId(comment.replies, targetId);
+      if (nested != null) {
+        return comment.id;
+      }
+    }
+    return null;
+  }
+
+  void _scheduleHighlightScroll(List<CommentEntity> comments) {
+    if (_didScrollToHighlight || widget.highlightCommentId == null) {
+      return;
+    }
+    final rootId = _findRootCommentId(comments, widget.highlightCommentId!);
+    if (rootId == null) {
+      return;
+    }
+    final key = _commentKeys[rootId];
+    if (key?.currentContext == null) {
+      return;
+    }
+    _didScrollToHighlight = true;
+    Scrollable.ensureVisible(
+      key!.currentContext!,
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeInOut,
+    );
   }
 
   @override
@@ -445,15 +593,32 @@ class _CommentsModalContentState extends State<_CommentsModalContent> {
                         ? state.comments
                         : state.comments.take(1).toList();
 
+                    WidgetsBinding.instance.addPostFrameCallback(
+                      (_) => _scheduleHighlightScroll(state.comments),
+                    );
+
                     return ListView(
                       controller: scrollController,
                       padding: const EdgeInsets.all(16),
                       children: [
                         ...commentsToShow.map(
-                          (comment) => Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: _CommentCard(comment: comment),
-                          ),
+                          (comment) {
+                            final key = _commentKeys.putIfAbsent(
+                              comment.id,
+                              () => GlobalKey(),
+                            );
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: KeyedSubtree(
+                                key: key,
+                                child: _CommentCard(
+                                  comment: comment,
+                                  highlightCommentId:
+                                      widget.highlightCommentId,
+                                ),
+                              ),
+                            );
+                          },
                         ),
 
                         // Boton "Ver mas"
@@ -543,9 +708,10 @@ class _CommentsModalContentState extends State<_CommentsModalContent> {
 }
 
 class _CommentCard extends StatefulWidget {
-  const _CommentCard({required this.comment});
+  const _CommentCard({required this.comment, this.highlightCommentId});
 
   final CommentEntity comment;
+  final String? highlightCommentId;
 
   @override
   State<_CommentCard> createState() => _CommentCardState();
@@ -555,6 +721,32 @@ class _CommentCardState extends State<_CommentCard> {
   bool _showReplyField = false;
   bool _showReplies = false;
   final _replyController = TextEditingController();
+
+  bool get _isHighlighted =>
+      widget.highlightCommentId != null &&
+      widget.highlightCommentId == widget.comment.id;
+
+  bool get _hasHighlightedReply => widget.highlightCommentId != null &&
+      _containsReply(widget.comment.replies, widget.highlightCommentId!);
+
+  @override
+  void initState() {
+    super.initState();
+    if (_hasHighlightedReply) {
+      _showReplies = true;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _CommentCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.highlightCommentId != oldWidget.highlightCommentId &&
+        _hasHighlightedReply) {
+      setState(() {
+        _showReplies = true;
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -586,16 +778,35 @@ class _CommentCardState extends State<_CommentCard> {
     });
   }
 
+  bool _containsReply(List<CommentEntity> replies, String targetId) {
+    for (final reply in replies) {
+      if (reply.id == targetId) {
+        return true;
+      }
+      if (_containsReply(reply.replies, targetId)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final timeAgo = _formatTimeAgo(widget.comment.createdAt);
+    final backgroundColor = _isHighlighted
+        ? theme.colorScheme.primary.withOpacity(0.18)
+        : theme.colorScheme.surface;
+    final border = _isHighlighted
+        ? Border.all(color: theme.colorScheme.primary, width: 1.2)
+        : null;
 
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: backgroundColor,
         borderRadius: BorderRadius.circular(12),
+        border: border,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -757,7 +968,10 @@ class _CommentCardState extends State<_CommentCard> {
                     .map(
                       (reply) => Padding(
                         padding: const EdgeInsets.only(bottom: 8),
-                        child: _ReplyCard(reply: reply),
+                        child: _ReplyCard(
+                          reply: reply,
+                          highlightCommentId: widget.highlightCommentId,
+                        ),
                       ),
                     )
                     .toList(),
@@ -786,20 +1000,30 @@ class _CommentCardState extends State<_CommentCard> {
 }
 
 class _ReplyCard extends StatelessWidget {
-  const _ReplyCard({required this.reply});
+  const _ReplyCard({required this.reply, this.highlightCommentId});
 
   final CommentEntity reply;
+  final String? highlightCommentId;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final timeAgo = _formatTimeAgo(reply.createdAt);
+    final isHighlighted =
+        highlightCommentId != null && reply.id == highlightCommentId;
+    final backgroundColor = isHighlighted
+        ? theme.colorScheme.primary.withOpacity(0.18)
+        : theme.colorScheme.surface.withValues(alpha: 0.5);
+    final border = isHighlighted
+        ? Border.all(color: theme.colorScheme.primary, width: 1)
+        : null;
 
     return Container(
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-  color: theme.colorScheme.surface.withValues(alpha: 0.5),
+        color: backgroundColor,
         borderRadius: BorderRadius.circular(8),
+        border: border,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,

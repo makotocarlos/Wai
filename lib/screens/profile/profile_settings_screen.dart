@@ -3,6 +3,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'package:wappa_app/features/auth/presentation/bloc/auth_bloc.dart';
 
+import 'package:wappa_app/features/notifications/presentation/pages/notifications_settings_page.dart';
+
 class ProfileSettingsScreen extends StatelessWidget {
   const ProfileSettingsScreen({super.key});
 
@@ -18,7 +20,16 @@ class ProfileSettingsScreen extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 8),
         children: [
           const _SettingsTile(title: 'Perfil & cuenta'),
-          const _SettingsTile(title: 'Notificaciones'),
+          _SettingsTile(
+            title: 'Notificaciones',
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const NotificationsSettingsPage(),
+                ),
+              );
+            },
+          ),
           const _SettingsTile(title: 'Preferencias de lectura'),
           const _SettingsTile(
             title: 'Modo oscuro',
@@ -51,10 +62,11 @@ class ProfileSettingsScreen extends StatelessWidget {
 }
 
 class _SettingsTile extends StatelessWidget {
-  const _SettingsTile({required this.title, this.subtitle});
+  const _SettingsTile({required this.title, this.subtitle, this.onTap});
 
   final String title;
   final String? subtitle;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -62,7 +74,7 @@ class _SettingsTile extends StatelessWidget {
       title: Text(title),
       subtitle: subtitle == null ? null : Text(subtitle!),
       trailing: const Icon(Icons.chevron_right),
-      onTap: () {},
+      onTap: onTap,
     );
   }
 }

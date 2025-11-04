@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:collection';
 
 import '../../domain/entities/book_entity.dart';
+import '../../domain/entities/book_search_sort.dart';
 import '../../domain/entities/chapter_entity.dart';
 import '../../domain/entities/comment_entity.dart';
 import '../../domain/repositories/books_repository.dart';
@@ -11,19 +12,22 @@ class InMemoryBooksRepository implements BooksRepository {
 
   final Map<String, BookEntity> _books = {};
   final Map<String, List<CommentEntity>> _comments = {};
-  final Map<String, List<CommentEntity>> _chapterComments = {}; // Comentarios de capítulos
+  final Map<String, List<CommentEntity>> _chapterComments =
+      {}; // Comentarios de capítulos
   final Map<String, Set<String>> _viewsByBook = {};
   final Map<String, Map<String, BookReactionType>> _reactionsByBook = {};
   final Map<String, Set<String>> _favoritesByBook = {};
-  final Map<String, StreamController<List<BookEntity>>> _favoriteControllers = {};
+  final Map<String, StreamController<List<BookEntity>>> _favoriteControllers =
+      {};
 
   final StreamController<List<BookEntity>> _booksController =
       StreamController<List<BookEntity>>.broadcast();
   final Map<String, StreamController<BookEntity>> _bookControllers = {};
+  final Map<String, StreamController<List<CommentEntity>>> _commentControllers =
+      {};
   final Map<String, StreamController<List<CommentEntity>>>
-      _commentControllers = {};
-  final Map<String, StreamController<List<CommentEntity>>>
-      _chapterCommentControllers = {}; // Controllers para comentarios de capítulos
+      _chapterCommentControllers =
+      {}; // Controllers para comentarios de capítulos
 
   @override
   Stream<List<BookEntity>> watchBooks({String? userId}) {
@@ -158,6 +162,74 @@ class InMemoryBooksRepository implements BooksRepository {
   }
 
   @override
+  Future<List<BookEntity>> searchBooks({
+    String? query,
+    String? category,
+    BookSearchSort sortBy = BookSearchSort.recent,
+    int limit = 40,
+    String? currentUserId,
+  }) async {
+    var results = _books.values
+        .map((book) =>
+            currentUserId == null ? book : _withUserState(book, currentUserId))
+        .toList(growable: false);
+
+    final trimmedCategory = category?.trim();
+    if (trimmedCategory != null && trimmedCategory.isNotEmpty) {
+      final normalized = trimmedCategory.toLowerCase();
+      results = results
+          .where((book) => book.category.toLowerCase() == normalized)
+          .toList(growable: false);
+    }
+
+    final trimmedQuery = query?.trim();
+    if (trimmedQuery != null && trimmedQuery.isNotEmpty) {
+      final normalized = trimmedQuery.toLowerCase();
+      results = results
+          .where(
+            (book) =>
+                book.title.toLowerCase().contains(normalized) ||
+                book.authorName.toLowerCase().contains(normalized) ||
+                book.category.toLowerCase().contains(normalized),
+          )
+          .toList(growable: false);
+    }
+
+    switch (sortBy) {
+      case BookSearchSort.recent:
+        results.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        break;
+      case BookSearchSort.mostViewed:
+        results.sort((a, b) => b.viewCount.compareTo(a.viewCount));
+        break;
+      case BookSearchSort.mostLiked:
+        results.sort((a, b) => b.likeCount.compareTo(a.likeCount));
+        break;
+    }
+
+    if (limit > 0 && results.length > limit) {
+      results = results.take(limit).toList(growable: false);
+    }
+
+    return results;
+  }
+
+  @override
+  Future<List<String>> fetchCategories() async {
+    final categories = <String, String>{};
+    for (final book in _books.values) {
+      final raw = book.category.trim();
+      if (raw.isEmpty) {
+        continue;
+      }
+      final key = raw.toLowerCase();
+      categories.putIfAbsent(key, () => raw);
+    }
+    final keys = categories.keys.toList()..sort();
+    return keys.map((key) => categories[key]!).toList(growable: false);
+  }
+
+  @override
   Future<void> addComment({
     required String bookId,
     required CommentEntity comment,
@@ -177,7 +249,7 @@ class InMemoryBooksRepository implements BooksRepository {
     final list = _comments.putIfAbsent(bookId, () => <CommentEntity>[]);
     list.add(reply);
     list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-    
+
     // Construir árbol y emitir
     final tree = _buildCommentTree(list);
     _commentControllers[bookId]?.add(UnmodifiableListView(tree));
@@ -208,7 +280,7 @@ class InMemoryBooksRepository implements BooksRepository {
 
     // 2. Construir árbol: asignar replies a sus padres
     final rootComments = <CommentEntity>[];
-    
+
     for (final comment in allComments.values) {
       if (comment.isRootComment) {
         // Comentario raíz
@@ -217,12 +289,12 @@ class InMemoryBooksRepository implements BooksRepository {
         // Es una reply, agregarlo a su padre
         final parentId = comment.parentCommentId!;
         final parent = allComments[parentId];
-        
+
         if (parent != null) {
           // Actualizar lista de replies del padre
           final updatedReplies = List<CommentEntity>.from(parent.replies)
             ..add(comment);
-          
+
           allComments[parentId] = parent.copyWith(
             replies: updatedReplies,
             replyCount: updatedReplies.length,
@@ -315,7 +387,7 @@ class InMemoryBooksRepository implements BooksRepository {
     final list = _chapterComments[chapterId] ?? [];
     list.add(comment);
     _chapterComments[chapterId] = list;
-    
+
     // Construir árbol y emitir
     final tree = _buildCommentTree(list);
     _chapterCommentControllers[chapterId]?.add(UnmodifiableListView(tree));
@@ -330,14 +402,15 @@ class InMemoryBooksRepository implements BooksRepository {
     final list = _chapterComments[chapterId] ?? [];
     list.add(reply);
     _chapterComments[chapterId] = list;
-    
+
     // Construir árbol y emitir
     final tree = _buildCommentTree(list);
     _chapterCommentControllers[chapterId]?.add(UnmodifiableListView(tree));
   }
 
   @override
-  Stream<List<CommentEntity>> watchChapterComments(String chapterId, {String? userId}) {
+  Stream<List<CommentEntity>> watchChapterComments(String chapterId,
+      {String? userId}) {
     _chapterCommentControllers.putIfAbsent(
       chapterId,
       () => StreamController<List<CommentEntity>>.broadcast(),
@@ -392,7 +465,8 @@ class InMemoryBooksRepository implements BooksRepository {
       category: category ?? book.category,
       coverPath: coverPath ?? book.coverPath,
       chapters: chapters ?? book.chapters,
-      publishedChapterIndex: publishedChapterIndex ?? book.publishedChapterIndex,
+      publishedChapterIndex:
+          publishedChapterIndex ?? book.publishedChapterIndex,
     );
 
     _books[bookId] = updatedBook;
