@@ -29,4 +29,8 @@ class SupabaseNotificationsRepository implements NotificationsRepository {
   @override
   Future<void> markAsRead(String notificationId) =>
       _datasource.markAsRead(notificationId);
+
+  @override
+  Future<void> deleteAllNotifications() =>
+      _datasource.deleteAllNotifications();
 }

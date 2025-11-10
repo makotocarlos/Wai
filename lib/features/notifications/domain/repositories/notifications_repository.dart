@@ -8,4 +8,6 @@ abstract class NotificationsRepository {
   Future<void> markCategoryAsRead(NotificationType type);
 
   Future<void> markAsRead(String notificationId);
+
+  Future<void> deleteAllNotifications();
 }

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -52,6 +53,45 @@ class _PublishBookScreenState extends State<PublishBookScreen> {
     }
   }
 
+  Widget _buildCoverPreview(String path) {
+    if (_isRemotePath(path)) {
+      if (path.trim().toLowerCase().startsWith('data:')) {
+        try {
+          final commaIndex = path.indexOf(',');
+          final data = commaIndex >= 0 ? path.substring(commaIndex + 1) : path;
+          final bytes = base64Decode(data);
+          return Image.memory(
+            bytes,
+            fit: BoxFit.cover,
+            width: double.infinity,
+          );
+        } catch (_) {
+          return const Icon(Icons.broken_image_outlined);
+        }
+      }
+      return Image.network(
+        path,
+        fit: BoxFit.cover,
+        width: double.infinity,
+        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined),
+      );
+    }
+
+    return Image.file(
+      File(path),
+      fit: BoxFit.cover,
+      width: double.infinity,
+      errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined),
+    );
+  }
+
+  bool _isRemotePath(String value) {
+    final normalized = value.trim().toLowerCase();
+    return normalized.startsWith('http://') ||
+        normalized.startsWith('https://') ||
+        normalized.startsWith('data:');
+  }
+
   Future<void> _editChapter({
     required BuildContext context,
     required int index,
@@ -88,7 +128,7 @@ class _PublishBookScreenState extends State<PublishBookScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Libro publicado con exito.')),
           );
-          Navigator.of(context).pop();
+          Navigator.of(context).pop(state.lastCreatedBook);
         }
       },
       builder: (context, state) {
@@ -161,11 +201,7 @@ class _PublishBookScreenState extends State<PublishBookScreen> {
                                     )
                                   : ClipRRect(
                                       borderRadius: BorderRadius.circular(8),
-                                      child: Image.file(
-                                        File(coverPath),
-                                        fit: BoxFit.cover,
-                                        width: double.infinity,
-                                      ),
+                                      child: _buildCoverPreview(coverPath),
                                     ),
                             ),
                           ),

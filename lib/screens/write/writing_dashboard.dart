@@ -34,7 +34,9 @@ class WritingDashboard extends StatelessWidget {
                     create: (_) => BookFormCubit(
                       createBook: sl<CreateBookUseCase>(),
                       user: user,
+                      uploadBookCover: sl(),
                       draftRepository: sl(),
+                      booksEventBus: sl(),
                     ),
                     child: const PublishBookScreen(),
                   ),

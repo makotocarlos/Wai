@@ -7,11 +7,11 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../core/di/injection.dart';
 import '../../features/auth/domain/entities/user_entity.dart';
 import '../../features/books/domain/entities/book_entity.dart';
-import '../../features/books/domain/usecases/delete_book.dart';
 import '../../features/books/domain/usecases/watch_books.dart';
 import '../../features/books/presentation/cubit/book_form_cubit.dart';
 import '../../features/books/presentation/cubit/book_list_cubit.dart';
 import '../../features/books/presentation/cubit/book_list_state.dart';
+import '../../features/books/presentation/cubit/books_event_bus.dart';
 import '../../features/books/presentation/pages/book_detail_page.dart';
 import '../library/edit_book_screen.dart';
 
@@ -27,6 +27,7 @@ class LibraryScreen extends StatelessWidget {
         watchBooks: sl<WatchBooksUseCase>(),
         user: user,
         onlyUserBooks: true,
+        eventsBus: sl(),
       )..start(),
       child: BlocBuilder<BookListCubit, BookListState>(
         builder: (context, state) {
@@ -218,7 +219,9 @@ class _BookOptionsMenu extends StatelessWidget {
           create: (_) => BookFormCubit(
             createBook: sl(),
             user: user,
+            uploadBookCover: sl(),
             draftRepository: sl(),
+            booksEventBus: sl(),
           ),
           child: EditBookScreen(book: book),
         ),
@@ -227,51 +230,7 @@ class _BookOptionsMenu extends StatelessWidget {
 
     if (updatedBook != null && context.mounted) {
       context.read<BookListCubit>().upsertBook(updatedBook);
-    }
-  }
-
-  Future<void> _deleteBook(BuildContext context) async {
-    Navigator.pop(context); // Cerrar modal
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Eliminar libro'),
-        content: const Text(
-          '¿Estás seguro? No podrás recuperar el libro.',
-          style: TextStyle(color: Colors.red),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('No'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Sí'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true && context.mounted) {
-      try {
-        final deleteUseCase = sl<DeleteBookUseCase>();
-        await deleteUseCase(bookId: book.id);
-
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Libro eliminado')),
-          );
-        }
-      } catch (e) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error al eliminar: $e')),
-          );
-        }
-      }
+      sl<BooksEventBus>().emitUpdated(updatedBook);
     }
   }
 
@@ -287,14 +246,7 @@ class _BookOptionsMenu extends StatelessWidget {
             title: const Text('Editar libro'),
             onTap: () => _editBook(context),
           ),
-          ListTile(
-            leading: const Icon(Icons.delete_outline, color: Colors.red),
-            title: const Text(
-              'Eliminar libro',
-              style: TextStyle(color: Colors.red),
-            ),
-            onTap: () => _deleteBook(context),
-          ),
+          // Botón de eliminar REMOVIDO - ahora está dentro de la pantalla de edición
         ],
       ),
     );

@@ -139,9 +139,11 @@ class _SearchScreenState extends State<SearchScreen>
                       ),
                     ),
                     const SizedBox(width: 12),
-                    _AvailableSorts(
-                      selected: state.sort,
-                      onSelected: context.read<SearchCubit>().changeSort,
+                    Expanded(
+                      child: _AvailableSorts(
+                        selected: state.sort,
+                        onSelected: context.read<SearchCubit>().changeSort,
+                      ),
                     ),
                   ],
                 ),
@@ -186,24 +188,28 @@ class _AvailableSorts extends StatelessWidget {
     final theme = Theme.of(context);
     final options = BookSearchSort.values;
 
-    return Wrap(
-      spacing: 8,
-      runSpacing: 4,
-      children: options
-          .map(
-            (option) => ChoiceChip(
-              label: Text(option.label),
-              selected: selected == option,
-              onSelected: (_) => onSelected(option),
-              selectedColor: theme.colorScheme.primary.withValues(alpha: 0.2),
-              labelStyle: theme.textTheme.bodySmall?.copyWith(
-                color: selected == option
-                    ? theme.colorScheme.primary
-                    : theme.textTheme.bodySmall?.color,
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: options
+            .map(
+              (option) => Padding(
+                padding: const EdgeInsets.only(right: 8.0),
+                child: ChoiceChip(
+                  label: Text(option.label),
+                  selected: selected == option,
+                  onSelected: (_) => onSelected(option),
+                  selectedColor: theme.colorScheme.primary.withValues(alpha: 0.2),
+                  labelStyle: theme.textTheme.bodySmall?.copyWith(
+                    color: selected == option
+                        ? theme.colorScheme.primary
+                        : theme.textTheme.bodySmall?.color,
+                  ),
+                ),
               ),
-            ),
-          )
-          .toList(),
+            )
+            .toList(),
+      ),
     );
   }
 }

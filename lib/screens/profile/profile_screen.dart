@@ -2,7 +2,6 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 
@@ -58,25 +57,8 @@ class _ProfileViewState extends State<_ProfileView> {
     );
 
     if (!mounted || picked == null) return;
-
-    final cropped = await ImageCropper().cropImage(
-      sourcePath: picked.path,
-      aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
-      compressQuality: 85,
-      uiSettings: [
-        AndroidUiSettings(
-          toolbarTitle: 'Recortar avatar',
-          toolbarColor: Theme.of(context).colorScheme.surface,
-          activeControlsWidgetColor: Theme.of(context).colorScheme.primary,
-        ),
-        IOSUiSettings(title: 'Recortar avatar'),
-      ],
-    );
-
-    if (!mounted || cropped == null) return;
-
-    final bytes = await cropped.readAsBytes();
-    await _uploadAvatar(bytes, p.extension(cropped.path));
+    final bytes = await picked.readAsBytes();
+    await _uploadAvatar(bytes, p.extension(picked.path));
   }
 
   Future<void> _uploadAvatar(Uint8List bytes, String extension) async {
@@ -216,6 +198,12 @@ class _ProfileViewState extends State<_ProfileView> {
   }
 
   void _openConnections(ProfileEntity profile, ProfileConnectionsType type) {
+    final privacyMessage = _privacyBlockMessage(profile, type);
+    if (privacyMessage != null) {
+      _showInfoSnackBar(privacyMessage);
+      return;
+    }
+
     if (type == ProfileConnectionsType.favorites) {
       Navigator.of(context).push(
         MaterialPageRoute<void>(
@@ -249,11 +237,43 @@ class _ProfileViewState extends State<_ProfileView> {
   }
 
   void _openPublishedBooks(ProfileEntity profile) {
+    if (!profile.isCurrentUser && profile.privacy.booksPrivate) {
+      _showInfoSnackBar('Este usuario mantiene sus libros en privado.');
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => ProfileBooksScreen(profile: profile),
       ),
     );
+  }
+
+  String? _privacyBlockMessage(
+      ProfileEntity profile, ProfileConnectionsType type) {
+    if (profile.isCurrentUser) {
+      return null;
+    }
+    final privacy = profile.privacy;
+    switch (type) {
+      case ProfileConnectionsType.followers:
+        return privacy.followersPrivate
+            ? 'Este usuario mantiene sus seguidores en privado.'
+            : null;
+      case ProfileConnectionsType.following:
+        return privacy.followingPrivate
+            ? 'Este usuario mantiene a quienes sigue en privado.'
+            : null;
+      case ProfileConnectionsType.favorites:
+        return privacy.favoritesPrivate
+            ? 'Este usuario mantiene sus favoritos en privado.'
+            : null;
+    }
+  }
+
+  void _showInfoSnackBar(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override

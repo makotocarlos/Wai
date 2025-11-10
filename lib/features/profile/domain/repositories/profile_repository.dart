@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import '../entities/privacy_settings_entity.dart';
 import '../entities/profile_entity.dart';
 
 abstract class ProfileRepository {
@@ -15,5 +16,14 @@ abstract class ProfileRepository {
   Future<List<ProfileEntity>> fetchFollowers(String userId);
   Future<List<ProfileEntity>> fetchFollowing(String userId);
   Future<List<ProfileEntity>> fetchFavorites(String userId);
+  Future<PrivacySettingsEntity> fetchPrivacySettings();
+  Future<PrivacySettingsEntity> updatePrivacySettings(
+    PrivacySettingsEntity settings,
+  );
   Stream<ProfileEntity> watchProfile(String userId);
+  
+  /// Elimina la cuenta del usuario actual y todos sus datos asociados.
+  /// Esto incluye: libros, capítulos, comentarios, likes, favoritos,
+  /// seguidores, seguidos, mensajes, notificaciones y perfil.
+  Future<void> deleteAccount();
 }

@@ -17,6 +17,16 @@ class ProfileFavoritesScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isLocked = !profile.isCurrentUser && profile.privacy.favoritesPrivate;
+    if (isLocked) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Favoritos')),
+        body: const _LockedSectionMessage(
+          message: 'Este usuario mantiene sus favoritos en privado.',
+        ),
+      );
+    }
+
     return BlocProvider<ProfileFavoritesCubit>(
       create: (_) => sl<ProfileFavoritesCubit>()..watchFavorites(profile.id),
       child: _FavoriteBooksView(profile: profile),
@@ -170,4 +180,23 @@ class _PlaceholderCover extends StatelessWidget {
 bool _looksLikeUrl(String value) {
   final uri = Uri.tryParse(value);
   return uri != null && uri.hasScheme && uri.host.isNotEmpty;
+}
+
+class _LockedSectionMessage extends StatelessWidget {
+  const _LockedSectionMessage({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Text(
+          message,
+          textAlign: TextAlign.center,
+        ),
+      ),
+    );
+  }
 }

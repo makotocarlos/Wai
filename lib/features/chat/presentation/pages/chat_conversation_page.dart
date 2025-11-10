@@ -104,7 +104,8 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
               ScaffoldMessenger.of(context)
                 ..hideCurrentSnackBar()
                 ..showSnackBar(
-                  SnackBar(content: Text('No se pudo eliminar el mensaje: $error')),
+                  SnackBar(
+                      content: Text('No se pudo eliminar el mensaje: $error')),
                 );
             }
           },
@@ -129,6 +130,79 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
     );
   }
 
+  Future<void> _showDeleteAllMessagesDialog() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Eliminar toda la conversación'),
+        content: const Text(
+          '¿Estás seguro de que quieres eliminar todos los mensajes de esta conversación? '
+          'Esta acción no se puede deshacer.',
+          style: TextStyle(color: Colors.red),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.red,
+              textStyle: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            child: const Text('Sí, eliminar todo'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      try {
+        // Mostrar indicador de carga
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                SizedBox(width: 16),
+                Text('Eliminando mensajes...'),
+              ],
+            ),
+            duration: Duration(seconds: 10),
+          ),
+        );
+
+        // Eliminar todos los mensajes
+        await _cubit.deleteAllMessages();
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ Todos los mensajes eliminados'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('❌ Error al eliminar: $error'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
+  }
+
   Widget _buildReplyPreview(ChatConversationState state) {
     final replyingTo = state.replyingTo;
     if (replyingTo == null) {
@@ -140,9 +214,8 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
         : replyingTo.sender.username.isNotEmpty
             ? replyingTo.sender.username
             : replyingTo.sender.email;
-    final text = replyingTo.isDeleted
-        ? 'Mensaje eliminado'
-        : (replyingTo.body ?? '');
+    final text =
+        replyingTo.isDeleted ? 'Mensaje eliminado' : (replyingTo.body ?? '');
 
     return Container(
       margin: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
@@ -182,14 +255,15 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
 
   Widget _buildMessageBubble(ChatMessageEntity message) {
     final isMine = message.sender.id == widget.currentUserId;
-  final background = isMine
-    ? Theme.of(context).colorScheme.primary
-    : Theme.of(context).colorScheme.surfaceContainerHighest;
+    final background = isMine
+        ? Theme.of(context).colorScheme.primary
+        : Theme.of(context).colorScheme.surfaceContainerHighest;
     final textColor = isMine
         ? Theme.of(context).colorScheme.onPrimary
         : Theme.of(context).colorScheme.onSurfaceVariant;
     final reply = message.replyTo;
     final timestamp = DateFormat('HH:mm').format(message.createdAt.toLocal());
+    final maxWidth = MediaQuery.of(context).size.width * 0.75;
 
     Widget? replySection;
     Color adjustAlpha(Color color, double factor) {
@@ -203,9 +277,8 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
           : reply.sender.username.isNotEmpty
               ? reply.sender.username
               : reply.sender.email;
-      final replyText = reply.isDeleted
-          ? 'Mensaje eliminado'
-          : (reply.body ?? 'Mensaje');
+      final replyText =
+          reply.isDeleted ? 'Mensaje eliminado' : (reply.body ?? 'Mensaje');
       replySection = Container(
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(8),
@@ -242,10 +315,10 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
     final content = message.isDeleted
         ? Text(
             'Mensaje eliminado',
-      style: Theme.of(context)
-        .textTheme
-        .bodyMedium
-        ?.copyWith(color: adjustAlpha(textColor, 0.7), fontStyle: FontStyle.italic),
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: adjustAlpha(textColor, 0.7),
+                  fontStyle: FontStyle.italic,
+                ),
           )
         : Text(
             message.body ?? '',
@@ -269,6 +342,7 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
               bottomLeft: Radius.circular(isMine ? 16 : 0),
             ),
           ),
+          constraints: BoxConstraints(maxWidth: maxWidth),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -276,15 +350,18 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
               if (replySection != null) replySection,
               content,
               const SizedBox(height: 6),
-              Align(
-                alignment: Alignment.bottomRight,
-                child: Text(
-                  timestamp,
-                  style: Theme.of(context)
-                      .textTheme
-                      .labelSmall
-                      ?.copyWith(color: adjustAlpha(textColor, 0.8)),
-                ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Text(
+                    timestamp,
+                    style: Theme.of(context)
+                        .textTheme
+                        .labelSmall
+                        ?.copyWith(color: adjustAlpha(textColor, 0.8)),
+                  ),
+                ],
               ),
             ],
           ),
@@ -320,17 +397,29 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
             ),
           ],
         ),
+        actions: [
+          // 🗑️ Botón para eliminar todos los mensajes
+          IconButton(
+            icon: const Icon(Icons.delete_sweep_outlined),
+            tooltip: 'Borrar toda la conversación',
+            onPressed: () => _showDeleteAllMessagesDialog(),
+          ),
+        ],
       ),
       body: BlocProvider.value(
         value: _cubit,
         child: BlocListener<ChatConversationCubit, ChatConversationState>(
-          listenWhen: (previous, current) => previous.messages != current.messages,
+          listenWhen: (previous, current) =>
+              previous.messages != current.messages,
           listener: (_, __) => _scrollToBottom(),
           child: Column(
             children: [
               Expanded(
-                child: BlocConsumer<ChatConversationCubit, ChatConversationState>(
-                  listenWhen: (previous, current) => current.errorMessage != null && previous.errorMessage != current.errorMessage,
+                child:
+                    BlocConsumer<ChatConversationCubit, ChatConversationState>(
+                  listenWhen: (previous, current) =>
+                      current.errorMessage != null &&
+                      previous.errorMessage != current.errorMessage,
                   listener: (context, state) {
                     final message = state.errorMessage;
                     if (message == null || !mounted) return;
@@ -363,7 +452,8 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
                 ),
               ),
               BlocBuilder<ChatConversationCubit, ChatConversationState>(
-                buildWhen: (previous, current) => previous.replyingTo != current.replyingTo,
+                buildWhen: (previous, current) =>
+                    previous.replyingTo != current.replyingTo,
                 builder: (context, state) => _buildReplyPreview(state),
               ),
               SafeArea(
@@ -388,14 +478,16 @@ class _ChatConversationPageState extends State<ChatConversationPage> {
                       ),
                       const SizedBox(width: 8),
                       BlocBuilder<ChatConversationCubit, ChatConversationState>(
-                        buildWhen: (previous, current) => previous.isSending != current.isSending,
+                        buildWhen: (previous, current) =>
+                            previous.isSending != current.isSending,
                         builder: (context, state) {
                           return IconButton(
                             icon: state.isSending
                                 ? const SizedBox(
                                     width: 20,
                                     height: 20,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
                                   )
                                 : const Icon(Icons.send_rounded),
                             onPressed: state.isSending ? null : _sendMessage,

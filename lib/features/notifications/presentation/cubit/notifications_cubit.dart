@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../domain/entities/notification_entity.dart';
+import '../../domain/usecases/delete_all_notifications.dart';
 import '../../domain/usecases/mark_all_notifications_as_read.dart';
 import '../../domain/usecases/mark_notification_as_read.dart';
 import '../../domain/usecases/mark_notifications_category_as_read.dart';
@@ -15,16 +16,19 @@ class NotificationsCubit extends Cubit<NotificationsState> {
     required MarkAllNotificationsAsReadUseCase markAllNotificationsAsRead,
     required MarkNotificationsCategoryAsReadUseCase markCategoryAsRead,
     required MarkNotificationAsReadUseCase markNotificationAsRead,
+    required DeleteAllNotificationsUseCase deleteAllNotifications,
   })  : _watchNotifications = watchNotifications,
         _markAllNotificationsAsRead = markAllNotificationsAsRead,
         _markCategoryAsRead = markCategoryAsRead,
         _markNotificationAsRead = markNotificationAsRead,
+        _deleteAllNotifications = deleteAllNotifications,
         super(const NotificationsState());
 
   final WatchNotificationsUseCase _watchNotifications;
   final MarkAllNotificationsAsReadUseCase _markAllNotificationsAsRead;
   final MarkNotificationsCategoryAsReadUseCase _markCategoryAsRead;
   final MarkNotificationAsReadUseCase _markNotificationAsRead;
+  final DeleteAllNotificationsUseCase _deleteAllNotifications;
 
   StreamSubscription<List<AppNotification>>? _subscription;
 
@@ -60,6 +64,27 @@ class NotificationsCubit extends Cubit<NotificationsState> {
 
   Future<void> markNotificationAsRead(String notificationId) =>
       _markNotificationAsRead(notificationId);
+
+  Future<void> deleteAllNotifications() async {
+    print('🗑️ Eliminando todas las notificaciones...');
+    try {
+      await _deleteAllNotifications();
+      print('✅ Todas las notificaciones eliminadas');
+      
+      // Forzar actualización inmediata del estado
+      print('🔄 Actualizando estado a lista vacía...');
+      emit(
+        state.copyWith(
+          notifications: [],
+          status: NotificationsStatus.loaded,
+        ),
+      );
+      print('✅ Estado actualizado correctamente');
+    } catch (e) {
+      print('❌ Error eliminando notificaciones: $e');
+      rethrow;
+    }
+  }
 
   @override
   Future<void> close() {

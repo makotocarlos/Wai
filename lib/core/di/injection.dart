@@ -14,9 +14,13 @@ import '../../features/auth/domain/usecases/sign_up.dart';
 import '../../features/auth/domain/usecases/watch_auth_state.dart';
 import '../../features/auth/presentation/bloc/auth_bloc.dart';
 import '../../features/books/data/repositories_impl/books_repository_impl.dart';
+// import '../../features/books/data/repositories_impl/cached_books_repository.dart'; // TODO: Activar cuando esté completo
+import '../../features/books/data/datasources/books_local_datasource.dart';
 import '../../features/books/data/repositories_impl/draft_repository.dart';
 import '../../features/books/domain/repositories/books_repository.dart';
 import '../database/local_database.dart';
+import '../database/offline_database.dart';
+import '../sync/sync_manager.dart';
 import '../../features/books/domain/usecases/add_comment.dart';
 import '../../features/books/domain/usecases/add_view.dart';
 import '../../features/books/domain/usecases/create_book.dart';
@@ -29,6 +33,7 @@ import '../../features/books/domain/usecases/toggle_favorite.dart';
 import '../../features/books/domain/usecases/watch_book.dart';
 import '../../features/books/domain/usecases/watch_books.dart';
 import '../../features/books/domain/usecases/watch_comments.dart';
+import '../../features/books/domain/usecases/upload_book_cover.dart';
 import '../../features/books/domain/usecases/watch_favorite_books.dart';
 // Comentarios de capítulos
 import '../../features/books/domain/usecases/add_chapter_comment.dart';
@@ -37,6 +42,7 @@ import '../../features/books/domain/usecases/watch_chapter_comments.dart';
 // Update and delete books
 import '../../features/books/domain/usecases/update_book.dart';
 import '../../features/books/domain/usecases/delete_book.dart';
+import '../../features/books/presentation/cubit/books_event_bus.dart';
 import '../../features/books/presentation/cubit/search_cubit.dart';
 import '../../features/books/presentation/cubit/chapter_ai_cubit.dart';
 import '../../features/chat/data/repositories/chat_repository_impl.dart';
@@ -57,14 +63,25 @@ import '../../features/profile/presentation/cubit/profile_connections_cubit.dart
 import '../../features/profile/presentation/cubit/profile_cubit.dart';
 import '../../features/profile/presentation/cubit/profile_favorites_cubit.dart';
 import '../../features/profile/presentation/cubit/profile_books_cubit.dart';
+import '../../features/profile/domain/usecases/get_privacy_settings.dart';
+import '../../features/profile/domain/usecases/update_privacy_settings.dart';
+import '../../features/profile/domain/usecases/delete_account.dart';
+import '../../features/profile/presentation/cubit/privacy_settings_cubit.dart';
 import '../../features/notifications/data/datasources/supabase_notifications_datasource.dart';
 import '../../features/notifications/data/repositories_impl/supabase_notifications_repository.dart';
 import '../../features/notifications/domain/repositories/notifications_repository.dart';
+import '../../features/notifications/domain/usecases/delete_all_notifications.dart';
 import '../../features/notifications/domain/usecases/mark_all_notifications_as_read.dart';
 import '../../features/notifications/domain/usecases/mark_notification_as_read.dart';
 import '../../features/notifications/domain/usecases/mark_notifications_category_as_read.dart';
 import '../../features/notifications/domain/usecases/watch_notifications.dart';
 import '../../features/notifications/presentation/cubit/notifications_cubit.dart';
+import '../../features/settings/data/datasources/theme_local_data_source.dart';
+import '../../features/settings/data/repositories/theme_repository_impl.dart';
+import '../../features/settings/domain/repositories/theme_repository.dart';
+import '../../features/settings/domain/usecases/load_theme_mode.dart';
+import '../../features/settings/domain/usecases/update_theme_mode.dart';
+import '../../features/settings/presentation/cubit/theme_cubit.dart';
 import '../../services/ai/gemini_search_service.dart';
 import '../../services/notification/push_notifications_service.dart';
 
@@ -77,6 +94,10 @@ Future<void> initInjection(SupabaseClient client) async {
   }
   sl.registerSingleton<SupabaseClient>(client);
 
+  if (!sl.isRegistered<BooksEventBus>()) {
+    sl.registerLazySingleton<BooksEventBus>(() => BooksEventBus());
+  }
+
   sl
     ..registerLazySingleton<SupabaseAuthDatasource>(
       () => SupabaseAuthDatasource(client: sl()),
@@ -84,6 +105,22 @@ Future<void> initInjection(SupabaseClient client) async {
     ..registerLazySingleton<AuthRepository>(
       () => SupabaseAuthRepository(datasource: sl()),
     )
+    // Offline Database y Sync Manager (listos para usar)
+    ..registerLazySingleton<OfflineDatabase>(
+      () => OfflineDatabase.instance,
+    )
+    ..registerLazySingleton<SyncManager>(
+      () => SyncManager.instance,
+    )
+    // Books Local DataSource (listo para usar)
+    ..registerLazySingleton<BooksLocalDataSource>(
+      () => BooksLocalDataSource(
+        localDb: sl(),
+        syncManager: sl(),
+      ),
+    )
+    // Por ahora usar repositorio remoto directo
+    // TODO: Cambiar a CachedBooksRepository cuando esté completamente implementado
     ..registerLazySingleton<BooksRepository>(
       () => SupabaseBooksRepository(client: sl()),
     )
@@ -108,6 +145,7 @@ Future<void> initInjection(SupabaseClient client) async {
     ..registerLazySingleton(() => WatchFavoriteBooksUseCase(sl()))
     ..registerLazySingleton(() => SearchBooksUseCase(sl()))
     ..registerLazySingleton(() => GetBookCategoriesUseCase(sl()))
+    ..registerLazySingleton(() => UploadBookCoverUseCase(sl()))
     ..registerLazySingleton(() => IncrementBookViewsUseCase(sl()))
     ..registerLazySingleton(() => AddViewUseCase(sl()))
     ..registerLazySingleton(() => AddCommentUseCase(sl()))
@@ -121,13 +159,28 @@ Future<void> initInjection(SupabaseClient client) async {
     ..registerLazySingleton(() => UpdateBookUseCase(sl()))
     ..registerLazySingleton(() => DeleteBookUseCase(sl()))
     ..registerLazySingleton(() => GeminiSearchService())
-  ..registerFactory(() => ChapterAiCubit(geminiSearchService: sl()))
+    ..registerLazySingleton<ThemeLocalDataSource>(
+      () => ThemeLocalDataSource(),
+    )
+    ..registerLazySingleton<ThemeRepository>(
+      () => ThemeRepositoryImpl(sl()),
+    )
+    ..registerLazySingleton(() => LoadThemeMode(sl()))
+    ..registerLazySingleton(() => UpdateThemeMode(sl()))
+    ..registerFactory(
+      () => ThemeCubit(
+        loadThemeMode: sl(),
+        updateThemeMode: sl(),
+      ),
+    )
+    ..registerFactory(() => ChapterAiCubit(geminiSearchService: sl()))
     ..registerFactory(() => SearchCubit(
           searchBooks: sl(),
           getBookCategories: sl(),
           watchFavoriteBooks: sl(),
           watchUserBooks: sl(),
           geminiSearchService: sl(),
+          booksEventBus: sl(),
         ))
     ..registerLazySingleton<ChatRepository>(
       () => SupabaseChatRepository(sl()),
@@ -158,6 +211,15 @@ Future<void> initInjection(SupabaseClient client) async {
     ..registerFactory(() => ProfileConnectionsCubit(sl()))
     ..registerFactory(() => ProfileBooksCubit(sl()))
     ..registerFactory(() => ProfileFavoritesCubit(sl()))
+    ..registerLazySingleton(() => GetPrivacySettingsUseCase(sl()))
+    ..registerLazySingleton(() => UpdatePrivacySettingsUseCase(sl()))
+    ..registerLazySingleton(() => DeleteAccountUseCase(sl()))
+    ..registerFactory(
+      () => PrivacySettingsCubit(
+        getPrivacySettings: sl(),
+        updatePrivacySettings: sl(),
+      ),
+    )
     ..registerLazySingleton<SupabaseNotificationsDatasource>(
       () => SupabaseNotificationsDatasource(sl()),
     )
@@ -174,12 +236,14 @@ Future<void> initInjection(SupabaseClient client) async {
     ..registerLazySingleton(() => MarkAllNotificationsAsReadUseCase(sl()))
     ..registerLazySingleton(() => MarkNotificationsCategoryAsReadUseCase(sl()))
     ..registerLazySingleton(() => MarkNotificationAsReadUseCase(sl()))
+    ..registerLazySingleton(() => DeleteAllNotificationsUseCase(sl()))
     ..registerFactory(
       () => NotificationsCubit(
         watchNotifications: sl(),
         markAllNotificationsAsRead: sl(),
         markCategoryAsRead: sl(),
         markNotificationAsRead: sl(),
+        deleteAllNotifications: sl(),
       ),
     )
     ..registerFactory(

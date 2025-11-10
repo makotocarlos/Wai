@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import '../../domain/entities/privacy_settings_entity.dart';
 import '../../domain/entities/profile_entity.dart';
 import '../../domain/repositories/profile_repository.dart';
 import '../datasources/profile_remote_data_source.dart';
@@ -52,6 +53,18 @@ class ProfileRepositoryImpl implements ProfileRepository {
       _remoteDataSource.getFavorites(userId);
 
   @override
+  Future<PrivacySettingsEntity> fetchPrivacySettings() =>
+      _remoteDataSource.getPrivacySettings();
+
+  @override
+  Future<PrivacySettingsEntity> updatePrivacySettings(
+          PrivacySettingsEntity settings) =>
+      _remoteDataSource.updatePrivacySettings(settings);
+
+  @override
   Stream<ProfileEntity> watchProfile(String userId) =>
       _remoteDataSource.watchProfile(userId);
+
+  @override
+  Future<void> deleteAccount() => _remoteDataSource.deleteAccount();
 }

@@ -95,6 +95,39 @@ class ChatConversationCubit extends Cubit<ChatConversationState> {
     }
   }
 
+  Future<void> deleteAllMessages() async {
+    print('🗑️ Eliminando todos los mensajes del thread: $_threadId');
+    
+    try {
+      // Obtener todos los mensajes del usuario actual
+      final myMessages = state.messages.where((msg) => 
+        msg.sender.id == _currentUserId && !msg.isDeleted
+      ).toList();
+      
+      print('🗑️ Encontrados ${myMessages.length} mensajes para eliminar');
+      
+      // Eliminar cada mensaje uno por uno
+      for (final message in myMessages) {
+        try {
+          await _deleteMessage(
+            messageId: message.id,
+            senderId: _currentUserId,
+          );
+          print('✅ Mensaje eliminado: ${message.id}');
+        } catch (e) {
+          print('❌ Error eliminando mensaje ${message.id}: $e');
+          // Continuar con el siguiente mensaje
+        }
+      }
+      
+      print('✅ Proceso de eliminación completado');
+    } catch (error) {
+      print('❌ Error en deleteAllMessages: $error');
+      emit(state.copyWith(errorMessage: error.toString()));
+      rethrow;
+    }
+  }
+
   void setReply(ChatMessageEntity message) {
     if (message.isDeleted) {
       return;

@@ -1,30 +1,39 @@
 import 'dart:io';
 
 import 'package:bloc/bloc.dart';
+import 'package:path/path.dart' as p;
 
 import '../../../auth/domain/entities/user_entity.dart';
 import '../../data/repositories_impl/draft_repository.dart';
 import '../../domain/entities/chapter_entity.dart';
 import '../../domain/usecases/create_book.dart';
+import '../../domain/usecases/upload_book_cover.dart';
 import 'book_form_state.dart';
+import 'books_event_bus.dart';
 import 'chapter_ai_state.dart';
 
 class BookFormCubit extends Cubit<BookFormState> {
   BookFormCubit({
     required CreateBookUseCase createBook,
     required UserEntity user,
+    required UploadBookCoverUseCase uploadBookCover,
     DraftRepository? draftRepository,
     String? draftId,
+    BooksEventBus? booksEventBus,
   })  : _createBook = createBook,
         _user = user,
+        _uploadBookCover = uploadBookCover,
         _draftRepository = draftRepository,
         _draftId = draftId,
+        _booksEventBus = booksEventBus,
         super(const BookFormState());
 
   final CreateBookUseCase _createBook;
   final UserEntity _user;
+  final UploadBookCoverUseCase _uploadBookCover;
   final DraftRepository? _draftRepository;
   String? _draftId;
+  final BooksEventBus? _booksEventBus;
 
   /// Auto-guardar borrador después de cada cambio
   Future<void> _autoSaveDraft() async {
@@ -59,27 +68,27 @@ class BookFormCubit extends Cubit<BookFormState> {
   }
 
   void titleChanged(String value) {
-    emit(state.copyWith(title: value));
+    emit(state.copyWith(title: value, clearLastCreatedBook: true));
     _autoSaveDraft();
   }
 
   void categoryChanged(String value) {
-    emit(state.copyWith(category: value));
+    emit(state.copyWith(category: value, clearLastCreatedBook: true));
     _autoSaveDraft();
   }
 
   void descriptionChanged(String value) {
-    emit(state.copyWith(description: value));
+    emit(state.copyWith(description: value, clearLastCreatedBook: true));
     _autoSaveDraft();
   }
 
   void coverPicked(File? file) {
-    emit(state.copyWith(coverPath: file?.path));
+    emit(state.copyWith(coverPath: file?.path, clearLastCreatedBook: true));
     _autoSaveDraft();
   }
 
   void setCoverPath(String path) {
-    emit(state.copyWith(coverPath: path));
+    emit(state.copyWith(coverPath: path, clearLastCreatedBook: true));
     _autoSaveDraft();
   }
 
@@ -91,7 +100,7 @@ class BookFormCubit extends Cubit<BookFormState> {
       title: chapter.title,
       content: chapter.content,
     ));
-    emit(state.copyWith(chapters: chapters));
+    emit(state.copyWith(chapters: chapters, clearLastCreatedBook: true));
   }
 
   /// Reemplazar todos los capítulos (para cargar libro existente)
@@ -103,6 +112,7 @@ class BookFormCubit extends Cubit<BookFormState> {
       // Si no hay capítulos, crear uno por defecto
       emit(state.copyWith(
         chapters: [const ChapterDraftState(id: 'chapter_1', order: 1)],
+        clearLastCreatedBook: true,
       ));
       return;
     }
@@ -120,7 +130,10 @@ class BookFormCubit extends Cubit<BookFormState> {
       );
     }).toList();
 
-    emit(state.copyWith(chapters: draftChapters));
+    emit(state.copyWith(
+      chapters: draftChapters,
+      clearLastCreatedBook: true,
+    ));
   }
 
   void updateChapter(int index, {String? title, String? content}) {
@@ -130,7 +143,7 @@ class BookFormCubit extends Cubit<BookFormState> {
       title: title ?? chapters[index].title,
       content: content ?? chapters[index].content,
     );
-    emit(state.copyWith(chapters: chapters));
+    emit(state.copyWith(chapters: chapters, clearLastCreatedBook: true));
     _autoSaveDraft();
   }
 
@@ -154,7 +167,7 @@ class BookFormCubit extends Cubit<BookFormState> {
           : chapters[index].chatNextSteps,
     );
 
-    emit(state.copyWith(chapters: chapters));
+    emit(state.copyWith(chapters: chapters, clearLastCreatedBook: true));
     _autoSaveDraft();
   }
 
@@ -166,6 +179,7 @@ class BookFormCubit extends Cubit<BookFormState> {
     emit(state.copyWith(
       chapters: chapters,
       publishIndex: chapters.length - 1,
+      clearLastCreatedBook: true,
     ));
     _autoSaveDraft();
   }
@@ -193,12 +207,13 @@ class BookFormCubit extends Cubit<BookFormState> {
     emit(state.copyWith(
       chapters: chapters,
       publishIndex: newPublishIndex,
+      clearLastCreatedBook: true,
     ));
     _autoSaveDraft();
   }
 
   void setPublishIndex(int index) {
-    emit(state.copyWith(publishIndex: index));
+    emit(state.copyWith(publishIndex: index, clearLastCreatedBook: true));
     _autoSaveDraft();
   }
 
@@ -249,7 +264,11 @@ class BookFormCubit extends Cubit<BookFormState> {
       return;
     }
 
-    emit(state.copyWith(status: BookFormStatus.submitting, clearError: true));
+    emit(state.copyWith(
+      status: BookFormStatus.submitting,
+      clearError: true,
+      clearLastCreatedBook: true,
+    ));
 
     final publishIndex = state.publishIndex;
     final chapters = <ChapterEntity>[];
@@ -269,7 +288,8 @@ class BookFormCubit extends Cubit<BookFormState> {
     }
 
     try {
-      await _createBook(
+      final coverUrl = await _prepareCoverUrl();
+      final createdBook = await _createBook(
         authorId: _user.id,
         authorName: _user.username.isEmpty ? _user.email : _user.username,
         title: state.title.trim(),
@@ -277,20 +297,59 @@ class BookFormCubit extends Cubit<BookFormState> {
         description: state.description.trim(),
         chapters: chapters,
         publishedChapterIndex: state.publishIndex,
-        coverPath: state.coverPath,
+        coverPath: coverUrl,
       );
+
+      _booksEventBus?.emitCreated(createdBook);
 
       // Eliminar borrador local al publicar exitosamente
       if (_draftId != null && _draftRepository != null) {
         await _draftRepository!.deleteDraft(_draftId!);
       }
 
-      emit(state.copyWith(status: BookFormStatus.success));
+      emit(state.copyWith(
+        status: BookFormStatus.success,
+        lastCreatedBook: createdBook,
+        clearError: true,
+      ));
     } catch (error) {
       emit(state.copyWith(
         status: BookFormStatus.failure,
         errorMessage: 'No se pudo crear el libro. Intenta nuevamente.',
+        clearLastCreatedBook: true,
       ));
     }
   }
+
+  Future<String?> _prepareCoverUrl() async {
+    final path = state.coverPath;
+    if (path == null || path.isEmpty) {
+      return null;
+    }
+
+    if (_looksLikeUrl(path)) {
+      return path;
+    }
+
+    final file = File(path);
+    if (!await file.exists()) {
+      return null;
+    }
+
+    final bytes = await file.readAsBytes();
+    final extension = p.extension(path).replaceAll('.', '').toLowerCase();
+
+    return _uploadBookCover(
+      authorId: _user.id,
+      bytes: bytes,
+      fileExtension: extension.isEmpty ? 'jpg' : extension,
+    );
+  }
+}
+
+bool _looksLikeUrl(String value) {
+  final normalized = value.trim().toLowerCase();
+  return normalized.startsWith('http://') ||
+      normalized.startsWith('https://') ||
+      normalized.startsWith('data:');
 }

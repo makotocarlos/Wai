@@ -1,5 +1,7 @@
 import 'package:equatable/equatable.dart';
 
+import 'privacy_settings_entity.dart';
+
 class ProfileEntity extends Equatable {
   const ProfileEntity({
     required this.id,
@@ -13,7 +15,8 @@ class ProfileEntity extends Equatable {
     this.booksCount = 0,
     this.isFollowing = false,
     this.isCurrentUser = false,
-  });
+    PrivacySettingsEntity? privacy,
+  }) : privacy = privacy ?? PrivacySettingsEntity.defaults;
 
   final String id;
   final String username;
@@ -26,6 +29,7 @@ class ProfileEntity extends Equatable {
   final int booksCount;
   final bool isFollowing;
   final bool isCurrentUser;
+  final PrivacySettingsEntity privacy;
 
   ProfileEntity copyWith({
     String? id,
@@ -39,6 +43,7 @@ class ProfileEntity extends Equatable {
     int? booksCount,
     bool? isFollowing,
     bool? isCurrentUser,
+    PrivacySettingsEntity? privacy,
   }) {
     return ProfileEntity(
       id: id ?? this.id,
@@ -52,6 +57,7 @@ class ProfileEntity extends Equatable {
       booksCount: booksCount ?? this.booksCount,
       isFollowing: isFollowing ?? this.isFollowing,
       isCurrentUser: isCurrentUser ?? this.isCurrentUser,
+      privacy: privacy ?? this.privacy,
     );
   }
 
@@ -68,5 +74,6 @@ class ProfileEntity extends Equatable {
         booksCount,
         isFollowing,
         isCurrentUser,
+        privacy,
       ];
 }

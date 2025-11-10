@@ -65,10 +65,97 @@ class _NotificationsPageState extends State<NotificationsPage>
     });
   }
 
+  Future<void> _showDeleteAllDialog() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Eliminar todas las notificaciones'),
+        content: const Text(
+          '¿Estás seguro de que quieres eliminar todas tus notificaciones? Esta acción no se puede deshacer.',
+          style: TextStyle(color: Colors.red),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Eliminar todo'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      try {
+        // Mostrar indicador de carga
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                SizedBox(width: 16),
+                Text('Eliminando notificaciones...'),
+              ],
+            ),
+            duration: Duration(seconds: 30),
+          ),
+        );
+
+        await _cubit.deleteAllNotifications();
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ Todas las notificaciones eliminadas'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          
+          // Mensaje de error más detallado
+          String errorMessage = '❌ Error al eliminar notificaciones';
+          
+          if (e.toString().contains('políticas RLS') || 
+              e.toString().contains('RLS') ||
+              e.toString().contains('Supabase')) {
+            errorMessage = '❌ Error de permisos en Supabase\n'
+                'Falta configurar políticas RLS.\n'
+                'Ver archivo: supabase_notifications_delete_policy.sql';
+          }
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(errorMessage),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 8),
+              action: SnackBarAction(
+                label: 'Entendido',
+                textColor: Colors.white,
+                onPressed: () {
+                  ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                },
+              ),
+            ),
+          );
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final textTheme = Theme.of(context).textTheme;
     return BlocProvider.value(
       value: _cubit,
       child: BlocBuilder<NotificationsCubit, NotificationsState>(
@@ -100,6 +187,7 @@ class _NotificationsPageState extends State<NotificationsPage>
                     .where((item) => !item.isRead)
                     .length,
                 onMarkAllRead: _cubit.markAllAsRead,
+                onDeleteAll: _showDeleteAllDialog,
               ),
               const SizedBox(height: 16),
               for (final category in NotificationCategory.values)
@@ -316,10 +404,15 @@ class _NotificationsPageState extends State<NotificationsPage>
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.totalUnread, required this.onMarkAllRead});
+  const _Header({
+    required this.totalUnread, 
+    required this.onMarkAllRead,
+    required this.onDeleteAll,
+  });
 
   final int totalUnread;
   final VoidCallback onMarkAllRead;
+  final VoidCallback onDeleteAll;
 
   @override
   Widget build(BuildContext context) {
@@ -333,6 +426,11 @@ class _Header extends StatelessWidget {
               ?.copyWith(fontWeight: FontWeight.bold),
         ),
         const Spacer(),
+        IconButton(
+          icon: const Icon(Icons.delete_sweep_outlined),
+          tooltip: 'Eliminar todas las notificaciones',
+          onPressed: onDeleteAll,
+        ),
         if (totalUnread > 0)
           TextButton(
             onPressed: onMarkAllRead,

@@ -1,6 +1,11 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
+import 'package:wappa_app/core/sync/sync_manager.dart';
+import 'package:wappa_app/features/books/data/datasources/books_local_datasource.dart';
+import 'package:wappa_app/core/di/injection.dart';
 
 import '../../domain/entities/book_entity.dart';
 import '../../domain/entities/book_search_sort.dart';
@@ -19,59 +24,168 @@ class SupabaseBooksRepository implements BooksRepository {
   static const String _viewsTable = 'book_views';
   static const String _reactionsTable = 'book_reactions';
   static const String _favoritesTable = 'favorites';
+  static const String _coversBucket = 'book-covers';
+
+  static final Uuid _uuid = const Uuid();
 
   @override
-  Stream<List<BookEntity>> watchBooks({String? userId}) {
-    final baseQuery = _client.from(_booksTable);
+  Stream<List<BookEntity>> watchBooks({String? userId}) async* {
+    final syncManager = sl<SyncManager>();
+    final localDataSource = sl<BooksLocalDataSource>();
+    
+    // 🔥 PRIMERO: Emitir caché inmediatamente
+    try {
+      final cachedBooks = await localDataSource.getCachedBooks(authorId: userId);
+      print('📚 Libros en caché: ${cachedBooks.length}');
+      if (cachedBooks.isNotEmpty) {
+        yield cachedBooks;
+      }
+    } catch (e) {
+      print('⚠️ Error cargando caché: $e');
+    }
+    
+    // 🔥 Si estamos OFFLINE, seguir emitiendo caché cada vez que cambia
+    if (!syncManager.isOnline) {
+      print('📴 Offline - modo caché local');
+      
+      // Crear un stream que emita cada segundo para detectar cambios
+      // TODO: Mejorar con StreamController que se notifique en cada cambio
+      await for (final _ in Stream.periodic(const Duration(seconds: 2))) {
+        try {
+          final cachedBooks = await localDataSource.getCachedBooks(authorId: userId);
+          yield cachedBooks;
+        } catch (e) {
+          print('⚠️ Error actualizando caché: $e');
+        }
+      }
+      return;
+    }
+    
+    // 🔥 Si estamos ONLINE, stream desde Supabase
+    try {
+      // 🚀 PRIMERO: Sincronizar libros locales pendientes
+      await _syncLocalBooks(userId);
+      
+      final baseQuery = _client.from(_booksTable);
+      final streamBuilder = baseQuery.stream(primaryKey: ['id']);
 
-    // Configurar stream con eventos en tiempo real
-    final streamBuilder = baseQuery.stream(primaryKey: ['id']);
+      final stream = userId != null
+          ? streamBuilder
+              .eq('author_id', userId)
+              .order('created_at', ascending: false)
+          : streamBuilder.order('created_at', ascending: false);
 
-    final stream = userId != null
-        ? streamBuilder
-            .eq('author_id', userId)
-            .order('created_at', ascending: false)
-        : streamBuilder.order('created_at', ascending: false);
-
-    return stream.asyncMap((rows) async {
-      final books = await Future.wait(
-        rows.map(
-          (row) => _mapRowToBook(
-            row,
-            loadChapters: true, // Cargar capítulos para mostrar el contador
+      await for (final rows in stream) {
+        final books = await Future.wait(
+          rows.map(
+            (row) => _mapRowToBook(
+              row,
+              loadChapters: true,
+            ),
           ),
-        ),
-      );
-      return books;
-    }).handleError((error, __) {
-      throw Exception('Failed to watch books: $error');
-    });
+        );
+        
+        // 🔥 GUARDAR en caché para la próxima vez
+        try {
+          await localDataSource.cacheBooks(books, isSynced: true);
+        } catch (e) {
+          print('⚠️ Error guardando en caché: $e');
+        }
+        
+        yield books;
+      }
+    } catch (error) {
+      print('❌ Error cargando desde Supabase: $error');
+      
+      // 🔥 Si falla Supabase, intentar caché como fallback
+      try {
+        final cachedBooks = await localDataSource.getCachedBooks(authorId: userId);
+        if (cachedBooks.isNotEmpty) {
+          yield cachedBooks;
+          return;
+        }
+      } catch (e) {
+        print('⚠️ Error en fallback de caché: $e');
+      }
+      
+      // Solo lanzar error si NO hay caché
+      throw Exception('No se pudieron cargar los libros');
+    }
   }
 
   @override
   Stream<BookEntity> watchBook({
     required String bookId,
     required String userId,
-  }) {
-    final stream = _client
-        .from(_booksTable)
-        .stream(primaryKey: ['id'])
-        .eq('id', bookId)
-        .limit(1);
-
-    return stream.asyncMap((rows) async {
-      if (rows.isEmpty) {
-        throw Exception('El libro ya no esta disponible.');
+  }) async* {
+    final syncManager = sl<SyncManager>();
+    final localDataSource = sl<BooksLocalDataSource>();
+    
+    // 🔥 PRIMERO: Intentar cargar desde caché (respuesta inmediata)
+    try {
+      final cachedBooks = await localDataSource.getCachedBooks();
+      final cachedBook = cachedBooks.where((b) => b.id == bookId).firstOrNull;
+      if (cachedBook != null) {
+        print('✅ Libro cargado desde caché: ${cachedBook.title}');
+        yield cachedBook;
       }
-      final row = rows.first;
-      return _mapRowToBook(
-        row,
-        currentUserId: userId,
-        loadChapters: true,
-      );
-    }).handleError((error, __) {
-      throw Exception('Failed to watch book: $error');
-    });
+    } catch (e) {
+      print('⚠️ Error cargando libro desde caché: $e');
+    }
+    
+    // 🔥 Si estamos offline, devolver solo el caché
+    if (!syncManager.isOnline) {
+      print('📴 Offline - usando solo caché local para libro $bookId');
+      return;
+    }
+    
+    // 🔥 Si estamos online, intentar cargar desde Supabase
+    try {
+      final stream = _client
+          .from(_booksTable)
+          .stream(primaryKey: ['id'])
+          .eq('id', bookId)
+          .limit(1);
+
+      await for (final rows in stream) {
+        if (rows.isEmpty) {
+          throw Exception('El libro ya no esta disponible.');
+        }
+        
+        final row = rows.first;
+        final book = await _mapRowToBook(
+          row,
+          currentUserId: userId,
+          loadChapters: true,
+        );
+        
+        // 🔥 GUARDAR en caché para la próxima vez
+        try {
+          await localDataSource.cacheBooks([book], isSynced: true);
+        } catch (e) {
+          print('⚠️ Error guardando libro en caché: $e');
+        }
+        
+        yield book;
+      }
+    } catch (error) {
+      print('❌ Error cargando libro desde Supabase: $error');
+      
+      // 🔥 Si falla Supabase, intentar caché como fallback
+      try {
+        final cachedBooks = await localDataSource.getCachedBooks();
+        final cachedBook = cachedBooks.where((b) => b.id == bookId).firstOrNull;
+        if (cachedBook != null) {
+          yield cachedBook;
+          return;
+        }
+      } catch (e) {
+        print('❌ Error cargando fallback de caché: $e');
+      }
+      
+      // Solo lanzar error si no hay datos en caché
+      throw Exception('No se pudo cargar el libro');
+    }
   }
 
   @override
@@ -85,10 +199,101 @@ class SupabaseBooksRepository implements BooksRepository {
     required int publishedChapterIndex,
     String? coverPath,
   }) async {
+    final syncManager = sl<SyncManager>();
+    final localDataSource = sl<BooksLocalDataSource>();
+    
+    // Generar ID único para el libro
+    final bookId = 'local_${DateTime.now().millisecondsSinceEpoch}_${authorId.substring(0, 8)}';
+    
+    // Crear entidad del libro localmente
+    final newBook = BookEntity(
+      id: bookId,
+      authorId: authorId,
+      authorName: authorName,
+      title: title,
+      category: category,
+      description: description,
+      coverPath: coverPath,
+      publishedChapterIndex: publishedChapterIndex,
+      chapters: chapters,
+      viewCount: 0,
+      likeCount: 0,
+      dislikeCount: 0,
+      favoritesCount: 0,
+      createdAt: DateTime.now(),
+      userReaction: null,
+      isFavorited: false,
+    );
+    
+    // 🔥 GUARDAR en caché local PRIMERO (siempre funciona)
     try {
-      final inserted = await _client
-          .from(_booksTable)
-          .insert({
+      await localDataSource.cacheBooks([newBook], isSynced: false);
+      print('✅ Libro guardado localmente: $title');
+    } catch (e) {
+      print('❌ Error guardando en caché local: $e');
+      throw Exception('No se pudo guardar el libro localmente: $e');
+    }
+    
+    // 🔥 Si estamos ONLINE, crear en Supabase inmediatamente
+    if (syncManager.isOnline) {
+      try {
+        final inserted = await _client
+            .from(_booksTable)
+            .insert({
+              'author_id': authorId,
+              'author_name': authorName,
+              'title': title,
+              'category': category,
+              'description': description,
+              'cover_path': coverPath,
+              'published_chapter_index': publishedChapterIndex,
+            })
+            .select()
+            .maybeSingle();
+
+        if (inserted == null) {
+          throw Exception('No se pudo crear el libro en Supabase.');
+        }
+
+        final supabaseBookId = inserted['id'] as String;
+
+        // Insertar capítulos en Supabase
+        if (chapters.isNotEmpty) {
+          final payload = chapters
+              .map(
+                (chapter) => {
+                  'book_id': supabaseBookId,
+                  'chapter_order': chapter.order,
+                  'title': chapter.title,
+                  'content': chapter.content,
+                  'is_published': chapter.isPublished,
+                },
+              )
+              .toList();
+
+          await _client.from(_chaptersTable).insert(payload);
+        }
+
+        // Actualizar libro con ID real de Supabase
+        final supabaseBook = await _mapRowToBook(
+          inserted,
+          currentUserId: authorId,
+          loadChapters: true,
+        );
+        
+        // Actualizar caché con el libro sincronizado
+        await localDataSource.cacheBooks([supabaseBook], isSynced: true);
+        print('✅ Libro sincronizado con Supabase: $title');
+        
+        return supabaseBook;
+      } catch (e) {
+        print('⚠️ Error creando en Supabase (libro guardado localmente): $e');
+        // Encolar para sincronizar después
+        await syncManager.addToSyncQueue(
+          operationType: 'create',
+          entityType: 'book',
+          entityId: bookId,
+          payload: {
             'author_id': authorId,
             'author_name': authorName,
             'title': title,
@@ -96,39 +301,42 @@ class SupabaseBooksRepository implements BooksRepository {
             'description': description,
             'cover_path': coverPath,
             'published_chapter_index': publishedChapterIndex,
-          })
-          .select()
-          .maybeSingle();
-
-      if (inserted == null) {
-        throw Exception('No se pudo crear el libro. La respuesta fue vacia.');
+            'chapters': chapters.map((c) => {
+              'order': c.order,
+              'title': c.title,
+              'content': c.content,
+              'is_published': c.isPublished,
+            }).toList(),
+          },
+        );
+        // Devolver libro local (usuario lo ve inmediatamente)
+        return newBook;
       }
-
-      final String bookId = inserted['id'] as String;
-
-      if (chapters.isNotEmpty) {
-        final payload = chapters
-            .map(
-              (chapter) => {
-                'book_id': bookId,
-                'chapter_order': chapter.order,
-                'title': chapter.title,
-                'content': chapter.content,
-                'is_published': chapter.isPublished,
-              },
-            )
-            .toList();
-
-        await _client.from(_chaptersTable).insert(payload);
-      }
-
-      return _mapRowToBook(
-        inserted,
-        currentUserId: authorId,
-        loadChapters: true,
+    } else {
+      // 🔥 OFFLINE: Encolar para sincronizar cuando vuelva conexión
+      print('📴 Offline - libro se sincronizará cuando vuelva WiFi');
+      await syncManager.addToSyncQueue(
+        operationType: 'create',
+        entityType: 'book',
+        entityId: bookId,
+        payload: {
+          'author_id': authorId,
+          'author_name': authorName,
+          'title': title,
+          'category': category,
+          'description': description,
+          'cover_path': coverPath,
+          'published_chapter_index': publishedChapterIndex,
+          'chapters': chapters.map((c) => {
+            'order': c.order,
+            'title': c.title,
+            'content': c.content,
+            'is_published': c.isPublished,
+          }).toList(),
+        },
       );
-    } catch (e) {
-      throw Exception('Error al crear libro: $e');
+      
+      return newBook;
     }
   }
 
@@ -229,6 +437,32 @@ class SupabaseBooksRepository implements BooksRepository {
         .delete()
         .eq('book_id', bookId)
         .eq('user_id', userId);
+  }
+
+  @override
+  Future<String> uploadBookCover({
+    required String authorId,
+    required Uint8List bytes,
+    required String fileExtension,
+  }) async {
+    final storage = _client.storage.from(_coversBucket);
+    final sanitized = fileExtension.replaceAll('.', '').toLowerCase();
+    final extension = sanitized.isEmpty ? 'jpg' : sanitized;
+    final fileName =
+        '${DateTime.now().millisecondsSinceEpoch}_${_uuid.v4()}.$extension';
+    final path = '$authorId/$fileName';
+
+    await storage.uploadBinary(
+      path,
+      bytes,
+      fileOptions: FileOptions(
+        cacheControl: '3600',
+        upsert: true,
+        contentType: _contentTypeForExtension(extension),
+      ),
+    );
+
+    return storage.getPublicUrl(path);
   }
 
   @override
@@ -638,6 +872,24 @@ class SupabaseBooksRepository implements BooksRepository {
     return result != null;
   }
 
+  String _contentTypeForExtension(String extension) {
+    switch (extension.toLowerCase()) {
+      case 'png':
+        return 'image/png';
+      case 'webp':
+        return 'image/webp';
+      case 'gif':
+        return 'image/gif';
+      case 'bmp':
+        return 'image/bmp';
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      default:
+        return 'application/octet-stream';
+    }
+  }
+
   CommentEntity _mapComment(Map<String, dynamic> row,
       {bool likedByUser = false}) {
     return CommentEntity(
@@ -960,10 +1212,21 @@ class SupabaseBooksRepository implements BooksRepository {
         throw Exception('No se pudo obtener el libro actualizado.');
       }
 
-      return _mapRowToBook(
+      final updatedBook = await _mapRowToBook(
         bookData,
         loadChapters: true,
       );
+      
+      // 🔥 ACTUALIZAR caché local con el libro modificado
+      try {
+        final localDataSource = sl<BooksLocalDataSource>();
+        await localDataSource.cacheBooks([updatedBook], isSynced: true);
+        print('✅ Libro actualizado en caché local: ${updatedBook.title}');
+      } catch (e) {
+        print('⚠️ Error actualizando caché local: $e');
+      }
+      
+      return updatedBook;
     } catch (e) {
       throw Exception('Error al actualizar libro: $e');
     }
@@ -987,12 +1250,183 @@ class SupabaseBooksRepository implements BooksRepository {
 
   @override
   Future<void> deleteBook({required String bookId}) async {
+    final syncManager = sl<SyncManager>();
+    final localDataSource = sl<BooksLocalDataSource>();
+    
+    print('🗑️ Intentando eliminar libro: $bookId');
+    
     try {
-      // Supabase debería manejar las eliminaciones en cascada
-      // si las foreign keys están configuradas correctamente
-      await _client.from(_booksTable).delete().eq('id', bookId);
+      // 🔥 PRIMERO: Eliminar del caché local (respuesta inmediata)
+      await localDataSource.deleteCachedBook(bookId);
+      print('✅ Libro eliminado del caché local: $bookId');
+      
+      // 🔥 Si estamos online, eliminar de Supabase inmediatamente
+      if (syncManager.isOnline) {
+        try {
+          print('🌐 Online - eliminando de Supabase...');
+          print('📋 Libro ID: $bookId');
+          
+          // 1. Eliminar capítulos primero (por si no hay CASCADE)
+          print('⏳ Eliminando capítulos...');
+          final chaptersResult = await _client
+              .from(_chaptersTable)
+              .delete()
+              .eq('book_id', bookId)
+              .select();
+          print('✅ ${chaptersResult.length} capítulos eliminados de Supabase');
+          print('   Capítulos eliminados: $chaptersResult');
+          
+          // 2. Eliminar comentarios de los capítulos del libro
+          // Los comentarios están vinculados a chapter_id, no a book_id
+          print('⏳ Eliminando comentarios de los capítulos...');
+          int totalComments = 0;
+          for (final chapter in chaptersResult) {
+            final chapterId = chapter['id'] as String;
+            final commentsResult = await _client
+                .from('chapter_comments')
+                .delete()
+                .eq('chapter_id', chapterId)
+                .select();
+            totalComments += commentsResult.length;
+          }
+          print('✅ $totalComments comentarios eliminados de Supabase');
+          
+          // 3. Eliminar reacciones del libro
+          print('⏳ Eliminando reacciones...');
+          final reactionsResult = await _client
+              .from(_reactionsTable)
+              .delete()
+              .eq('book_id', bookId)
+              .select();
+          print('✅ ${reactionsResult.length} reacciones eliminadas de Supabase');
+          
+          // 4. Eliminar vistas del libro
+          print('⏳ Eliminando vistas...');
+          final viewsResult = await _client
+              .from(_viewsTable)
+              .delete()
+              .eq('book_id', bookId)
+              .select();
+          print('✅ ${viewsResult.length} vistas eliminadas de Supabase');
+          
+          // 5. Eliminar favoritos del libro
+          print('⏳ Eliminando favoritos...');
+          final favoritesResult = await _client
+              .from('favorites')  // ✅ Nombre correcto de la tabla
+              .delete()
+              .eq('book_id', bookId)
+              .select();
+          print('✅ ${favoritesResult.length} favoritos eliminados de Supabase');
+          
+          // 6. Finalmente eliminar el libro
+          print('⏳ Eliminando libro...');
+          final bookResult = await _client
+              .from(_booksTable)
+              .delete()
+              .eq('id', bookId)
+              .select();
+          
+          print('✅ Libro eliminado de Supabase: $bookResult');
+          print('🎉 ELIMINACIÓN COMPLETA - Total eliminado:');
+          print('   - Libro: 1');
+          print('   - Capítulos: ${chaptersResult.length}');
+          print('   - Comentarios: $totalComments');
+          print('   - Reacciones: ${reactionsResult.length}');
+          print('   - Vistas: ${viewsResult.length}');
+          print('   - Favoritos: ${favoritesResult.length}');
+        } catch (e) {
+          // Si falla Supabase, no pasa nada - ya está encolado para sincronizar
+          print('❌ Error eliminando de Supabase: $e');
+          print('Stack trace: ${StackTrace.current}');
+        }
+      } else {
+        print('📴 Offline - eliminación encolada para cuando haya conexión');
+      }
     } catch (e) {
+      print('❌ Error crítico eliminando libro: $e');
       throw Exception('Error al eliminar libro: $e');
+    }
+  }
+
+  /// Sincroniza libros locales (con ID local_*) a Supabase
+  Future<void> _syncLocalBooks(String? userId) async {
+    if (userId == null) return;
+    
+    final localDataSource = sl<BooksLocalDataSource>();
+    
+    try {
+      print('🔄 Verificando libros locales para sincronizar...');
+      
+      // Obtener libros locales (con ID local_*)
+      final cachedBooks = await localDataSource.getCachedBooks(authorId: userId);
+      final localBooks = cachedBooks.where((book) => 
+        book.id.startsWith('local_')
+      ).toList();
+      
+      if (localBooks.isEmpty) {
+        print('✅ No hay libros locales pendientes de sincronizar');
+        return;
+      }
+      
+      print('📤 Sincronizando ${localBooks.length} libro(s) local(es) a Supabase...');
+      
+      for (final localBook in localBooks) {
+        try {
+          print('📤 Sincronizando libro: "${localBook.title}" (${localBook.id})');
+          
+          // Crear el libro en Supabase
+          final bookData = {
+            'author_id': localBook.authorId,
+            'title': localBook.title,
+            'description': localBook.description,
+            'category': localBook.category,
+            'cover_path': localBook.coverPath,
+            'created_at': DateTime.now().toIso8601String(),
+          };
+          
+          final createdBookData = await _client
+              .from(_booksTable)
+              .insert(bookData)
+              .select()
+              .single();
+          
+          final newBookId = createdBookData['id'] as String;
+          print('✅ Libro creado en Supabase con ID: $newBookId');
+          
+          // Crear capítulos en Supabase
+          if (localBook.chapters.isNotEmpty) {
+            print('📤 Sincronizando ${localBook.chapters.length} capítulo(s)...');
+            
+            for (final chapter in localBook.chapters) {
+              final chapterData = {
+                'book_id': newBookId,
+                'chapter_order': chapter.order,
+                'title': chapter.title,
+                'content': chapter.content,
+                'is_published': chapter.isPublished,
+                'created_at': DateTime.now().toIso8601String(),
+              };
+              
+              await _client.from(_chaptersTable).insert(chapterData);
+            }
+            
+            print('✅ Capítulos sincronizados');
+          }
+          
+          // Eliminar el libro local del caché
+          await localDataSource.deleteCachedBook(localBook.id);
+          print('🗑️ Libro local eliminado del caché: ${localBook.id}');
+          
+          print('🎉 Sincronización completada para: "${localBook.title}"');
+        } catch (e) {
+          print('❌ Error sincronizando libro "${localBook.title}": $e');
+          // Continuar con el siguiente libro
+        }
+      }
+      
+      print('✅ Sincronización de libros locales completada');
+    } catch (e) {
+      print('❌ Error en _syncLocalBooks: $e');
     }
   }
 }

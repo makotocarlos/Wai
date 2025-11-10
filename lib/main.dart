@@ -12,6 +12,7 @@ import 'features/auth/presentation/pages/forgot_password_screen.dart';
 import 'features/auth/presentation/pages/login_page.dart';
 import 'features/auth/presentation/pages/register_screen.dart';
 import 'screens/home/home_screen.dart';
+import 'features/settings/presentation/cubit/theme_cubit.dart';
 import 'shared/theme/app_theme.dart';
 import 'firebase_options.dart';
 
@@ -52,8 +53,15 @@ class WaiRoot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return BlocProvider(
-      create: (_) => sl<AuthBloc>()..add(const AuthInitialize()),
+    return MultiBlocProvider(
+      providers: [
+        BlocProvider<AuthBloc>(
+          create: (_) => sl<AuthBloc>()..add(const AuthInitialize()),
+        ),
+        BlocProvider<ThemeCubit>(
+          create: (_) => sl<ThemeCubit>()..loadTheme(),
+        ),
+      ],
       child: const WaiApp(),
     );
   }
@@ -64,16 +72,22 @@ class WaiApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'WAI',
-      theme: AppTheme.darkGreen,
-      routes: {
-        RegisterScreen.routeName: (_) => const RegisterScreen(),
-        ForgotPasswordScreen.routeName: (_) => const ForgotPasswordScreen(),
-        HomeScreen.routeName: (_) => const HomeScreen(),
+    return BlocBuilder<ThemeCubit, ThemeMode>(
+      builder: (context, themeMode) {
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          title: 'WAI',
+          theme: AppTheme.lightGreen,
+          darkTheme: AppTheme.darkGreen,
+          themeMode: themeMode,
+          routes: {
+            RegisterScreen.routeName: (_) => const RegisterScreen(),
+            ForgotPasswordScreen.routeName: (_) => const ForgotPasswordScreen(),
+            HomeScreen.routeName: (_) => const HomeScreen(),
+          },
+          home: const AuthWrapper(),
+        );
       },
-      home: const AuthWrapper(),
     );
   }
 }

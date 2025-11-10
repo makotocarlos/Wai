@@ -4,6 +4,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:wappa_app/features/auth/presentation/bloc/auth_bloc.dart';
 
 import 'package:wappa_app/features/notifications/presentation/pages/notifications_settings_page.dart';
+import 'package:wappa_app/features/settings/presentation/cubit/theme_cubit.dart';
+import 'package:wappa_app/screens/profile/profile_account_settings_page.dart';
 
 class ProfileSettingsScreen extends StatelessWidget {
   const ProfileSettingsScreen({super.key});
@@ -19,7 +21,16 @@ class ProfileSettingsScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: 8),
         children: [
-          const _SettingsTile(title: 'Perfil & cuenta'),
+          _SettingsTile(
+            title: 'Perfil & cuenta',
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const ProfileAccountSettingsPage(),
+                ),
+              );
+            },
+          ),
           _SettingsTile(
             title: 'Notificaciones',
             onTap: () {
@@ -31,12 +42,33 @@ class ProfileSettingsScreen extends StatelessWidget {
             },
           ),
           const _SettingsTile(title: 'Preferencias de lectura'),
-          const _SettingsTile(
-            title: 'Modo oscuro',
-            subtitle: 'Automatico',
+          BlocBuilder<ThemeCubit, ThemeMode>(
+            builder: (context, mode) {
+              final isDarkMode = mode == ThemeMode.dark;
+              return ListTile(
+                title: const Text('Modo oscuro'),
+                subtitle: Text(isDarkMode ? 'Activado' : 'Desactivado'),
+                trailing: Switch(
+                  value: isDarkMode,
+                  onChanged: (value) =>
+                      context.read<ThemeCubit>().toggleDarkMode(value),
+                ),
+                onTap: () =>
+                    context.read<ThemeCubit>().toggleDarkMode(!isDarkMode),
+              );
+            },
           ),
           const Divider(height: 32),
-          const _SettingsTile(title: 'Privacidad & seguridad'),
+          _SettingsTile(
+            title: 'Privacidad & seguridad',
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const ProfileAccountSettingsPage(),
+                ),
+              );
+            },
+          ),
           const _SettingsTile(title: 'Suscripcion Premium'),
           const _SettingsTile(
             title: 'Idioma de la historia',

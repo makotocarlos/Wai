@@ -1,5 +1,7 @@
 import 'package:equatable/equatable.dart';
 
+import '../../domain/entities/book_entity.dart';
+
 import 'chapter_ai_state.dart';
 
 class ChapterDraftState extends Equatable {
@@ -70,6 +72,7 @@ class BookFormState extends Equatable {
     this.publishIndex = 0,
     this.status = BookFormStatus.idle,
     this.errorMessage,
+    this.lastCreatedBook,
   });
 
   final String title;
@@ -80,6 +83,7 @@ class BookFormState extends Equatable {
   final int publishIndex;
   final BookFormStatus status;
   final String? errorMessage;
+  final BookEntity? lastCreatedBook;
 
   BookFormState copyWith({
     String? title,
@@ -91,6 +95,8 @@ class BookFormState extends Equatable {
     BookFormStatus? status,
     String? errorMessage,
     bool clearError = false,
+    BookEntity? lastCreatedBook,
+    bool clearLastCreatedBook = false,
   }) {
     return BookFormState(
       title: title ?? this.title,
@@ -101,6 +107,9 @@ class BookFormState extends Equatable {
       publishIndex: publishIndex ?? this.publishIndex,
       status: status ?? this.status,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+      lastCreatedBook: clearLastCreatedBook
+          ? null
+          : (lastCreatedBook ?? this.lastCreatedBook),
     );
   }
 
@@ -114,5 +123,6 @@ class BookFormState extends Equatable {
         publishIndex,
         status,
         errorMessage,
+        lastCreatedBook,
       ];
 }

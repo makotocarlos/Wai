@@ -15,6 +15,7 @@ import '../../features/books/presentation/pages/book_detail_page.dart';
 import '../../features/notifications/presentation/cubit/notifications_cubit.dart';
 import '../../features/notifications/presentation/cubit/notifications_state.dart';
 import '../../features/notifications/presentation/pages/notifications_page.dart';
+import '../../components/offline_banner.dart';
 import '../profile/profile_screen.dart';
 import '../write/writing_dashboard.dart';
 import 'library_screen.dart';
@@ -226,9 +227,12 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: IndexedStack(
-        index: _currentIndex,
-        children: tabs.map((tab) => tab.builder(context)).toList(),
+      // 🔥 Agregar banner de offline aquí
+      body: OfflineBanner(
+        child: IndexedStack(
+          index: _currentIndex,
+          children: tabs.map((tab) => tab.builder(context)).toList(),
+        ),
       ),
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
@@ -252,18 +256,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildTabIcon(BuildContext context, _TabItem tab,
       {required bool isActive}) {
-    final iconData = isActive && tab.activeIcon != null
-        ? tab.activeIcon!
-        : tab.icon;
+    final iconData =
+        isActive && tab.activeIcon != null ? tab.activeIcon! : tab.icon;
     final icon = Icon(iconData);
 
     if (!tab.isNotifications || _unreadNotifications == 0) {
       return icon;
     }
 
-    final badgeLabel = _unreadNotifications > 99
-        ? '99+'
-        : '$_unreadNotifications';
+    final badgeLabel =
+        _unreadNotifications > 99 ? '99+' : '$_unreadNotifications';
 
     return Stack(
       clipBehavior: Clip.none,
@@ -318,7 +320,8 @@ class _FeedView extends StatefulWidget {
   State<_FeedView> createState() => _FeedViewState();
 }
 
-class _FeedViewState extends State<_FeedView> with AutomaticKeepAliveClientMixin {
+class _FeedViewState extends State<_FeedView>
+    with AutomaticKeepAliveClientMixin {
   late final BookListCubit _cubit;
 
   @override
@@ -326,6 +329,7 @@ class _FeedViewState extends State<_FeedView> with AutomaticKeepAliveClientMixin
     super.initState();
     _cubit = BookListCubit(
       watchBooks: sl<WatchBooksUseCase>(),
+      eventsBus: sl(),
     )..start();
   }
 
@@ -341,7 +345,7 @@ class _FeedViewState extends State<_FeedView> with AutomaticKeepAliveClientMixin
   @override
   Widget build(BuildContext context) {
     super.build(context); // Required for AutomaticKeepAliveClientMixin
-    
+
     return BlocProvider.value(
       value: _cubit,
       child: BlocBuilder<BookListCubit, BookListState>(

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../domain/entities/privacy_settings_entity.dart';
 import '../../domain/entities/profile_entity.dart';
 import 'profile_remote_data_source.dart';
 
@@ -99,14 +100,40 @@ class SupabaseProfileRemoteDataSource implements ProfileRemoteDataSource {
     await _client.storage.from(_avatarBucket).uploadBinary(
           path,
           bytes,
-          fileOptions: const FileOptions(upsert: true, cacheControl: '3600'),
+          fileOptions: const FileOptions(upsert: true, cacheControl: '0'),
         );
 
-    final publicUrl = _client.storage.from(_avatarBucket).getPublicUrl(path);
+    final baseUrl = _client.storage.from(_avatarBucket).getPublicUrl(path);
+    final publicUrl = '$baseUrl?v=${DateTime.now().millisecondsSinceEpoch}';
 
     await _client
         .from(_profilesTable)
         .update({'avatar_url': publicUrl}).eq('id', user.id);
+
+    // Mantener metadata sincronizada con Supabase Auth para refrescar la UI global.
+    try {
+      await _client.auth
+          .updateUser(UserAttributes(data: {'avatar_url': publicUrl}));
+    } catch (_) {
+      // Si falla, continuamos igual; la app seguirá mostrando el avatar desde profiles.
+    }
+
+    // Propagar avatar a comentarios existentes.
+    try {
+      await _client
+          .from(_bookCommentsTable)
+          .update({'user_avatar_url': publicUrl}).eq('user_id', user.id);
+    } catch (_) {
+      // Ignoramos errores para no bloquear al usuario.
+    }
+
+    try {
+      await _client
+          .from(_chapterCommentsTable)
+          .update({'user_avatar_url': publicUrl}).eq('user_id', user.id);
+    } catch (_) {
+      // Ignoramos errores para no bloquear al usuario.
+    }
 
     return publicUrl;
   }
@@ -172,6 +199,53 @@ class SupabaseProfileRemoteDataSource implements ProfileRemoteDataSource {
         .select('id')
         .eq('user_id', userId);
     return const [];
+  }
+
+  @override
+  Future<PrivacySettingsEntity> getPrivacySettings() async {
+    final user = _client.auth.currentUser;
+    if (user == null) {
+      throw const AuthException('User not authenticated');
+    }
+
+    final response = await _client
+        .from(_profilesTable)
+        .select(
+          'favorites_private, books_private, followers_private, following_private',
+        )
+        .eq('id', user.id)
+        .maybeSingle();
+
+    if (response == null) {
+      throw PostgrestException(message: 'Profile not found');
+    }
+
+    return PrivacySettingsEntity.fromMap(response);
+  }
+
+  @override
+  Future<PrivacySettingsEntity> updatePrivacySettings(
+    PrivacySettingsEntity settings,
+  ) async {
+    final user = _client.auth.currentUser;
+    if (user == null) {
+      throw const AuthException('User not authenticated');
+    }
+
+    final updated = await _client
+        .from(_profilesTable)
+        .update(settings.toMap())
+        .eq('id', user.id)
+        .select(
+          'favorites_private, books_private, followers_private, following_private',
+        )
+        .maybeSingle();
+
+    if (updated == null) {
+      throw PostgrestException(message: 'Unable to update privacy settings');
+    }
+
+    return PrivacySettingsEntity.fromMap(updated);
   }
 
   @override
@@ -303,10 +377,11 @@ class SupabaseProfileRemoteDataSource implements ProfileRemoteDataSource {
       followingCount: followingCountOverride ?? data['following_count'] as int? ?? 0,
       favoritesCount: favoritesCountOverride ?? data['favorites_count'] as int? ?? 0,
       friendsCount: data['friends_count'] as int? ?? 0,
-  booksCount: booksCountOverride ?? data['books_count'] as int? ?? 0,
+      booksCount: booksCountOverride ?? data['books_count'] as int? ?? 0,
       isFollowing: isFollowingOverride ?? data['is_following'] as bool? ?? false,
       isCurrentUser:
           isCurrentUser ?? (data['is_current_user'] as bool? ?? false),
+      privacy: PrivacySettingsEntity.fromMap(data),
     );
   }
 
@@ -384,5 +459,105 @@ class SupabaseProfileRemoteDataSource implements ProfileRemoteDataSource {
         .maybeSingle();
 
     return existing != null;
+  }
+
+  @override
+  Future<void> deleteAccount() async {
+    final user = _client.auth.currentUser;
+    if (user == null) {
+      throw const AuthException('User not authenticated');
+    }
+
+    final userId = user.id;
+    print('🗑️ Iniciando eliminación de cuenta del usuario: $userId');
+
+    try {
+      // 1. Eliminar todos los libros del usuario (esto eliminará automáticamente
+      //    capítulos, comentarios, likes, vistas gracias a CASCADE en la BD)
+      print('📚 Eliminando libros y contenido relacionado...');
+      await _client.from(_booksTable).delete().eq('author_id', userId);
+
+      // 2. Eliminar comentarios del usuario en libros de otros
+      print('💬 Eliminando comentarios en libros de otros...');
+      await _client.from(_bookCommentsTable).delete().eq('user_id', userId);
+      await _client.from(_chapterCommentsTable).delete().eq('user_id', userId);
+
+      // 3. Eliminar likes del usuario en comentarios de otros
+      print('❤️ Eliminando likes en comentarios...');
+      await _client.from('book_comment_likes').delete().eq('user_id', userId);
+      await _client.from('chapter_comment_likes').delete().eq('user_id', userId);
+
+      // 4. Eliminar favoritos del usuario
+      print('⭐ Eliminando favoritos...');
+      await _client.from(_favoritesTable).delete().eq('user_id', userId);
+
+      // 5. Eliminar seguidores (donde este usuario sigue a otros)
+      print('👥 Eliminando relaciones de seguimiento...');
+      await _client.from(_followersTable).delete().eq('follower_id', userId);
+
+      // 6. Eliminar seguidos (donde otros siguen a este usuario)
+      await _client.from(_followersTable).delete().eq('followed_id', userId);
+
+      // 7. Eliminar mensajes directos del usuario
+      print('💌 Eliminando mensajes directos...');
+      await _client.from('direct_messages').delete().eq('sender_id', userId);
+      
+      // 8. Eliminar participación en hilos de conversación
+      print('💬 Eliminando participación en conversaciones...');
+      await _client.from('direct_thread_participants').delete().eq('profile_id', userId);
+      
+      // 9. Eliminar hilos de conversación creados por el usuario
+      print('🗨️ Eliminando hilos de conversación creados...');
+      await _client.from('direct_threads').delete().eq('created_by', userId);
+
+      // 10. Eliminar notificaciones del usuario
+      print('🔔 Eliminando notificaciones...');
+      await _client.from('notifications').delete().eq('profile_id', userId);
+
+      // 11. Eliminar tokens de push
+      print('📱 Eliminando tokens de notificaciones push...');
+      await _client.from('user_push_tokens').delete().eq('user_id', userId);
+
+      // 12. Eliminar avatar del storage
+      print('🖼️ Eliminando avatar...');
+      try {
+        final files = await _client.storage
+            .from(_avatarBucket)
+            .list(path: userId);
+        
+        if (files.isNotEmpty) {
+          final filePaths = files.map((file) => '$userId/${file.name}').toList();
+          await _client.storage.from(_avatarBucket).remove(filePaths);
+        }
+      } catch (e) {
+        print('⚠️ Error eliminando avatar (puede no existir): $e');
+        // Continuamos aunque falle, el avatar no es crítico
+      }
+
+      // 13. Eliminar el perfil
+      print('👤 Eliminando perfil...');
+      await _client.from(_profilesTable).delete().eq('id', userId);
+
+      // 14. Finalmente, eliminar el usuario de Supabase Auth
+      print('🔐 Eliminando usuario de autenticación...');
+      try {
+        // Intentamos con el RPC que elimina el usuario de auth.users
+        await _client.rpc('delete_user');
+        print('✅ Usuario eliminado de auth.users');
+      } catch (e) {
+        // Si no existe el RPC, cerramos sesión con scope global
+        print('⚠️ RPC delete_user no disponible: $e');
+        print('⚠️ IMPORTANTE: La cuenta de auth NO se eliminó. Ejecuta supabase_delete_user_function.sql');
+      }
+      
+      // Siempre cerramos sesión con scope global para forzar logout
+      print('🚪 Cerrando sesión...');
+      await _client.auth.signOut(scope: SignOutScope.global);
+
+      print('✅ Cuenta eliminada completamente');
+    } catch (e) {
+      print('❌ Error eliminando cuenta: $e');
+      throw Exception('Error al eliminar la cuenta: $e');
+    }
   }
 }

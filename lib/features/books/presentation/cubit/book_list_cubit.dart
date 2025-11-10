@@ -6,12 +6,14 @@ import '../../../auth/domain/entities/user_entity.dart';
 import '../../domain/entities/book_entity.dart';
 import '../../domain/usecases/watch_books.dart';
 import 'book_list_state.dart';
+import 'books_event_bus.dart';
 
 class BookListCubit extends Cubit<BookListState> {
   BookListCubit({
     required WatchBooksUseCase watchBooks,
     UserEntity? user,
     bool onlyUserBooks = false,
+    BooksEventBus? eventsBus,
   })  : assert(
           !onlyUserBooks || user != null,
           'User must be provided when onlyUserBooks is true',
@@ -19,12 +21,17 @@ class BookListCubit extends Cubit<BookListState> {
         _watchBooks = watchBooks,
         _user = user,
         _onlyUserBooks = onlyUserBooks,
-        super(const BookListState());
+        _eventsBus = eventsBus,
+        super(const BookListState()) {
+    _eventsSubscription = _eventsBus?.stream.listen(_handleBookEvent);
+  }
 
   final WatchBooksUseCase _watchBooks;
   final UserEntity? _user;
   final bool _onlyUserBooks;
+  final BooksEventBus? _eventsBus;
   StreamSubscription? _subscription;
+  StreamSubscription<BooksEvent>? _eventsSubscription;
 
   UserEntity? get user => _user;
 
@@ -70,9 +77,37 @@ class BookListCubit extends Cubit<BookListState> {
     ));
   }
 
+  void removeBook(String bookId) {
+    final books =
+        state.books.where((book) => book.id != bookId).toList(growable: false);
+
+    emit(state.copyWith(
+      status: BookListStatus.success,
+      books: books,
+      clearError: true,
+    ));
+  }
+
   @override
   Future<void> close() {
     _subscription?.cancel();
+    _eventsSubscription?.cancel();
     return super.close();
+  }
+
+  void _handleBookEvent(BooksEvent event) {
+    if (_onlyUserBooks && event.book.authorId != _user?.id) {
+      return;
+    }
+
+    switch (event.type) {
+      case BooksEventType.created:
+      case BooksEventType.updated:
+        upsertBook(event.book);
+        break;
+      case BooksEventType.deleted:
+        removeBook(event.book.id);
+        break;
+    }
   }
 }

@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import '../../domain/entities/privacy_settings_entity.dart';
 import '../../domain/entities/profile_entity.dart';
 
 abstract class ProfileRemoteDataSource {
@@ -15,5 +16,12 @@ abstract class ProfileRemoteDataSource {
   Future<List<ProfileEntity>> getFollowers(String userId);
   Future<List<ProfileEntity>> getFollowing(String userId);
   Future<List<ProfileEntity>> getFavorites(String userId);
+  Future<PrivacySettingsEntity> getPrivacySettings();
+  Future<PrivacySettingsEntity> updatePrivacySettings(
+    PrivacySettingsEntity settings,
+  );
   Stream<ProfileEntity> watchProfile(String userId);
+  
+  /// Elimina la cuenta del usuario actual y todos sus datos asociados.
+  Future<void> deleteAccount();
 }

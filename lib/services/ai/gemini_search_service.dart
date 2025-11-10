@@ -7,7 +7,7 @@ import '../../features/books/domain/entities/book_entity.dart';
 
 /// Valores de respaldo solo para demostraciones locales. Rellena `kGeminiFallbackKey`
 /// con tu API key y elimínalo antes de compartir el proyecto.
-const String kGeminiFallbackKey = '';
+const String kGeminiFallbackKey = 'AIzaSyBRLTzVVMHNKS2pAzBG4uISNZ4DELFTzQU';
 const String kGeminiFallbackModel = 'gemini-2.5-flash';
 
 class GeminiSearchResult {

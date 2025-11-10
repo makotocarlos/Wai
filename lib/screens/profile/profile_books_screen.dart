@@ -17,6 +17,16 @@ class ProfileBooksScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isLocked = !profile.isCurrentUser && profile.privacy.booksPrivate;
+    if (isLocked) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Libros publicados')),
+        body: const _LockedSectionMessage(
+          message: 'Este usuario mantiene sus libros en privado.',
+        ),
+      );
+    }
+
     return BlocProvider<ProfileBooksCubit>(
       create: (_) => sl<ProfileBooksCubit>()..watchAuthorBooks(profile.id),
       child: _ProfileBooksView(profile: profile),
@@ -170,4 +180,23 @@ class _PlaceholderCover extends StatelessWidget {
 bool _looksLikeUrl(String value) {
   final uri = Uri.tryParse(value);
   return uri != null && uri.hasScheme && uri.host.isNotEmpty;
+}
+
+class _LockedSectionMessage extends StatelessWidget {
+  const _LockedSectionMessage({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Text(
+          message,
+          textAlign: TextAlign.center,
+        ),
+      ),
+    );
+  }
 }

@@ -6,9 +6,16 @@ import 'forgot_password_screen.dart';
 import 'register_screen.dart';
 
 class LoginPage extends StatefulWidget {
-	const LoginPage({super.key});
+	const LoginPage({
+		super.key,
+		this.initialEmail,
+		this.initialPassword,
+	});
 
 	static const String routeName = '/login';
+
+	final String? initialEmail;
+	final String? initialPassword;
 
 	@override
 	State<LoginPage> createState() => _LoginPageState();
@@ -19,6 +26,18 @@ class _LoginPageState extends State<LoginPage> {
 	final _emailController = TextEditingController();
 	final _passwordController = TextEditingController();
 	bool _obscurePassword = true;
+
+	@override
+	void initState() {
+		super.initState();
+		// Prellenar los campos si se proporcionan
+		if (widget.initialEmail != null) {
+			_emailController.text = widget.initialEmail!;
+		}
+		if (widget.initialPassword != null) {
+			_passwordController.text = widget.initialPassword!;
+		}
+	}
 
 	@override
 	void dispose() {
@@ -58,19 +77,24 @@ class _LoginPageState extends State<LoginPage> {
 									crossAxisAlignment: CrossAxisAlignment.stretch,
 									children: [
 										Center(
-											child: Image.asset(
-												'assets/logo.png',
-												height: 120,
+											child: Row(
+												mainAxisSize: MainAxisSize.min,
+												mainAxisAlignment: MainAxisAlignment.center,
+												children: [
+													Image.asset(
+														'assets/logo.png',
+														height: 80,
+													),
+													const SizedBox(width: 12),
+													Text(
+														'WAI',
+														style: theme.textTheme.displaySmall?.copyWith(
+															color: theme.colorScheme.primary,
+															fontWeight: FontWeight.bold,
+														),
+													),
+												],
 											),
-										),
-										const SizedBox(height: 16),
-										Text(
-											'WAI',
-											style: theme.textTheme.displaySmall?.copyWith(
-												color: theme.colorScheme.primary,
-												fontWeight: FontWeight.bold,
-											),
-											textAlign: TextAlign.center,
 										),
 										const SizedBox(height: 8),
 										Text(

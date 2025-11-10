@@ -1,15 +1,20 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path/path.dart' as p;
 
 import '../../core/di/injection.dart';
 import '../../features/books/domain/entities/book_entity.dart';
 import '../../features/books/domain/entities/chapter_entity.dart';
+import '../../features/books/domain/usecases/delete_book.dart';
 import '../../features/books/domain/usecases/update_book.dart';
+import '../../features/books/domain/usecases/upload_book_cover.dart';
 import '../../features/books/presentation/cubit/book_form_cubit.dart';
 import '../../features/books/presentation/cubit/book_form_state.dart';
+import '../../features/books/presentation/cubit/books_event_bus.dart';
 import '../../features/books/presentation/cubit/chapter_ai_cubit.dart';
 import '../write/publish_book_screen.dart';
 
@@ -68,6 +73,13 @@ class _EditBookScreenState extends State<EditBookScreen> {
       });
   }
 
+  bool _looksLikeUrl(String value) {
+    final normalized = value.trim().toLowerCase();
+    return normalized.startsWith('http://') ||
+        normalized.startsWith('https://') ||
+        normalized.startsWith('data:');
+  }
+
   Future<void> _pickCover(BookFormCubit cubit) async {
     final result = await _picker.pickImage(source: ImageSource.gallery);
     if (result != null) {
@@ -111,6 +123,29 @@ class _EditBookScreenState extends State<EditBookScreen> {
 
     try {
       final updateUseCase = sl<UpdateBookUseCase>();
+      final uploadCoverUseCase = sl<UploadBookCoverUseCase>();
+
+      String? updatedCoverPath;
+      if (state.coverPath != widget.book.coverPath) {
+        final candidate = state.coverPath;
+        if (candidate != null && candidate.isNotEmpty) {
+          if (_looksLikeUrl(candidate)) {
+            updatedCoverPath = candidate;
+          } else {
+            final file = File(candidate);
+            if (await file.exists()) {
+              final bytes = await file.readAsBytes();
+              final extension =
+                  p.extension(candidate).replaceAll('.', '').toLowerCase();
+              updatedCoverPath = await uploadCoverUseCase(
+                authorId: widget.book.authorId,
+                bytes: bytes,
+                fileExtension: extension.isEmpty ? 'jpg' : extension,
+              );
+            }
+          }
+        }
+      }
 
       // Enviar todos los capítulos con su estado de publicación
       final updatedBook = await updateUseCase(
@@ -121,8 +156,7 @@ class _EditBookScreenState extends State<EditBookScreen> {
             : null,
         category:
             state.category != widget.book.category ? state.category : null,
-        coverPath:
-            state.coverPath != widget.book.coverPath ? state.coverPath : null,
+        coverPath: updatedCoverPath,
         chapters: state.chapters.map((draft) {
           return ChapterEntity(
             id: draft.id,
@@ -149,6 +183,116 @@ class _EditBookScreenState extends State<EditBookScreen> {
           SnackBar(content: Text('Error al actualizar: $e')),
         );
       }
+    }
+  }
+
+  Future<void> _deleteBook() async {
+    print('🚀 [UI] Método _deleteBook llamado');
+    print('📖 [UI] Libro a eliminar: ${widget.book.id} - "${widget.book.title}"');
+    
+    // Mostrar diálogo de confirmación
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Eliminar libro'),
+        content: const Text(
+          '¿Estás seguro de eliminar este libro? Esta acción no se puede deshacer. '
+          'Se eliminarán todos los capítulos, comentarios, likes y reacciones.',
+          style: TextStyle(color: Colors.red),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              print('❌ [UI] Usuario canceló la eliminación');
+              Navigator.pop(dialogContext, false);
+            },
+            child: const Text('No'),
+          ),
+          TextButton(
+            onPressed: () {
+              print('✅ [UI] Usuario confirmó la eliminación');
+              Navigator.pop(dialogContext, true);
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.red,
+              textStyle: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            child: const Text('Sí, eliminar'),
+          ),
+        ],
+      ),
+    );
+
+    print('🔍 [UI] Resultado del diálogo: confirmed = $confirmed');
+
+    // Si el usuario confirmó la eliminación
+    if (confirmed == true && mounted) {
+      print('✅ [UI] Confirmación = true, procediendo a eliminar...');
+      try {
+        // Mostrar indicador de carga
+        if (mounted) {
+          print('⏳ [UI] Mostrando indicador de carga');
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Row(
+                children: [
+                  SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  SizedBox(width: 16),
+                  Text('Eliminando libro...'),
+                ],
+              ),
+              duration: Duration(seconds: 10),
+            ),
+          );
+        }
+
+        // Eliminar el libro
+        print('🔥 [UI] Llamando a deleteUseCase...');
+        final deleteUseCase = sl<DeleteBookUseCase>();
+        await deleteUseCase(bookId: widget.book.id);
+        print('✅ [UI] deleteUseCase completado sin errores');
+
+        // Emitir evento de eliminación
+        if (mounted) {
+          print('📢 [UI] Emitiendo evento de eliminación');
+          sl<BooksEventBus>().emitDeleted(widget.book);
+        }
+
+        // Mostrar mensaje de éxito y cerrar pantalla
+        if (mounted) {
+          print('🎉 [UI] Mostrando mensaje de éxito y cerrando pantalla');
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ Libro eliminado exitosamente'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+          
+          // Cerrar la pantalla sin retornar nada (el libro ya no existe)
+          Navigator.of(context).pop();
+        }
+      } catch (e) {
+        // Mostrar error
+        print('❌ [UI] Error capturado: $e');
+        print('📍 [UI] Stack trace: ${StackTrace.current}');
+        if (mounted) {
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('❌ Error al eliminar: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } else {
+      print('⚠️ [UI] No se eliminará el libro (confirmed=$confirmed, mounted=$mounted)');
     }
   }
 
@@ -350,6 +494,16 @@ class _EditBookScreenState extends State<EditBookScreen> {
                   onPressed: _saveChanges,
                   child: const Text('Guardar cambios'),
                 ),
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: _deleteBook,
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Eliminar libro'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red),
+                  ),
+                ),
               ],
             ),
           ),
@@ -359,7 +513,21 @@ class _EditBookScreenState extends State<EditBookScreen> {
   }
 
   Widget _buildCoverImage(String path) {
-    if (path.startsWith('http')) {
+    if (_looksLikeUrl(path)) {
+      if (path.trim().toLowerCase().startsWith('data:')) {
+        try {
+          final commaIndex = path.indexOf(',');
+          final data = commaIndex >= 0 ? path.substring(commaIndex + 1) : path;
+          final bytes = base64Decode(data);
+          return Image.memory(
+            bytes,
+            fit: BoxFit.cover,
+            width: double.infinity,
+          );
+        } catch (_) {
+          return const Icon(Icons.broken_image_outlined);
+        }
+      }
       return Image.network(
         path,
         fit: BoxFit.cover,
@@ -367,6 +535,7 @@ class _EditBookScreenState extends State<EditBookScreen> {
         errorBuilder: (_, __, ___) => const Icon(Icons.error),
       );
     }
+
     return Image.file(
       File(path),
       fit: BoxFit.cover,

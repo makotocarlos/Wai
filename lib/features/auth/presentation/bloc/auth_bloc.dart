@@ -114,10 +114,26 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
 		try {
 			await _signIn(event.email, event.password);
 		} on AuthException catch (error) {
+			// Mejorar mensajes de error según el código de error
+			String errorMessage;
+			if (error.message.toLowerCase().contains('invalid login credentials') ||
+					error.message.toLowerCase().contains('invalid_credentials')) {
+				errorMessage = '❌ Correo o contraseña incorrectos. Verifica tus datos.';
+			} else if (error.message.toLowerCase().contains('email not confirmed') ||
+					error.message.toLowerCase().contains('email_not_confirmed')) {
+				errorMessage = '📧 Debes verificar tu correo electrónico.\nRevisa tu bandeja de entrada y haz clic en el enlace de confirmación.';
+			} else if (error.message.toLowerCase().contains('user not found')) {
+				errorMessage = '❌ No existe una cuenta con este correo electrónico.';
+			} else if (error.message.toLowerCase().contains('too many requests')) {
+				errorMessage = '⏱️ Demasiados intentos. Espera un momento e intenta nuevamente.';
+			} else {
+				errorMessage = '❌ ${error.message}';
+			}
+			
 			emit(
 				state.copyWith(
 					status: AuthStatus.unauthenticated,
-					errorMessage: error.message,
+					errorMessage: errorMessage,
 					clearInfo: true,
 				),
 			);
@@ -125,7 +141,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
 			emit(
 				state.copyWith(
 					status: AuthStatus.unauthenticated,
-					errorMessage: 'Ocurrio un error al iniciar sesion.',
+					errorMessage: '❌ Ocurrio un error al iniciar sesion. Intenta nuevamente.',
 					clearInfo: true,
 				),
 			);

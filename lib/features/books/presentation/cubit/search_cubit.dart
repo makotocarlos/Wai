@@ -10,6 +10,7 @@ import '../../domain/usecases/search_books.dart';
 import '../../domain/usecases/watch_books.dart';
 import '../../domain/usecases/watch_favorite_books.dart';
 import '../../../../services/ai/gemini_search_service.dart';
+import 'books_event_bus.dart';
 import 'search_state.dart';
 
 class SearchCubit extends Cubit<SearchState> {
@@ -19,11 +20,13 @@ class SearchCubit extends Cubit<SearchState> {
     required WatchFavoriteBooksUseCase watchFavoriteBooks,
     required WatchBooksUseCase watchUserBooks,
     required GeminiSearchService geminiSearchService,
+    required BooksEventBus booksEventBus,
   })  : _searchBooks = searchBooks,
         _getBookCategories = getBookCategories,
         _watchFavoriteBooks = watchFavoriteBooks,
         _watchUserBooks = watchUserBooks,
         _geminiSearchService = geminiSearchService,
+        _booksEventBus = booksEventBus,
         super(const SearchState());
 
   final SearchBooksUseCase _searchBooks;
@@ -31,16 +34,20 @@ class SearchCubit extends Cubit<SearchState> {
   final WatchFavoriteBooksUseCase _watchFavoriteBooks;
   final WatchBooksUseCase _watchUserBooks;
   final GeminiSearchService _geminiSearchService;
+  final BooksEventBus _booksEventBus;
 
   Timer? _debounce;
   String? _userId;
   List<BookEntity> _cachedFavorites = const [];
   List<BookEntity> _cachedUserBooks = const [];
   bool _userContextLoaded = false;
+  StreamSubscription<BooksEvent>? _booksEventSub;
+  bool _pendingEventRefresh = false;
 
   void initialize({UserEntity? user}) {
     _userId = user?.id;
     emit(state.copyWith(isGeminiAvailable: _geminiSearchService.isConfigured));
+    _booksEventSub ??= _booksEventBus.stream.listen(_handleBooksEvent);
     _loadCategories();
     _performSearch(showLoading: true);
   }
@@ -257,6 +264,65 @@ class SearchCubit extends Cubit<SearchState> {
   @override
   Future<void> close() {
     _debounce?.cancel();
+    _booksEventSub?.cancel();
     return super.close();
+  }
+
+  void _handleBooksEvent(BooksEvent event) {
+    // Manejar creación y actualización
+    if (event.type == BooksEventType.created ||
+        event.type == BooksEventType.updated) {
+      if (_userId != null && event.book.authorId == _userId) {
+        final existingIndex =
+            _cachedUserBooks.indexWhere((book) => book.id == event.book.id);
+        if (existingIndex >= 0) {
+          final updated = [..._cachedUserBooks];
+          updated[existingIndex] = event.book;
+          _cachedUserBooks = updated;
+        } else {
+          _cachedUserBooks = [event.book, ..._cachedUserBooks];
+        }
+      }
+
+      if (_pendingEventRefresh) {
+        return;
+      }
+
+      _pendingEventRefresh = true;
+      unawaited(_performSearch(showLoading: false).whenComplete(() {
+        _pendingEventRefresh = false;
+      }));
+    }
+    
+    // 🔥 Manejar eliminación
+    if (event.type == BooksEventType.deleted) {
+      print('🔍 [SearchCubit] Libro eliminado detectado: ${event.book.id}');
+      
+      // Eliminar de caché de libros del usuario
+      if (_userId != null && event.book.authorId == _userId) {
+        _cachedUserBooks = _cachedUserBooks
+            .where((book) => book.id != event.book.id)
+            .toList();
+        print('🔍 [SearchCubit] Eliminado de _cachedUserBooks');
+      }
+      
+      // Eliminar de favoritos
+      _cachedFavorites = _cachedFavorites
+          .where((book) => book.id != event.book.id)
+          .toList();
+      
+      // Eliminar de resultados de búsqueda actuales
+      final updatedResults = state.results
+          .where((book) => book.id != event.book.id)
+          .toList();
+      
+      print('🔍 [SearchCubit] Actualizando resultados de búsqueda');
+      print('   - Antes: ${state.results.length} libros');
+      print('   - Después: ${updatedResults.length} libros');
+      
+      emit(state.copyWith(
+        results: updatedResults,
+      ));
+    }
   }
 }

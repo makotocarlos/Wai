@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:typed_data';
 
 import '../../domain/entities/book_entity.dart';
 import '../../domain/entities/book_search_sort.dart';
@@ -159,6 +160,18 @@ class InMemoryBooksRepository implements BooksRepository {
     _emitBooks();
     _emitBook(updatedBook, userId);
     _emitFavoritesForUser(userId);
+  }
+
+  @override
+  Future<String> uploadBookCover({
+    required String authorId,
+    required Uint8List bytes,
+    required String fileExtension,
+  }) async {
+    final sanitized = fileExtension.replaceAll('.', '').toLowerCase();
+    final extension = sanitized.isEmpty ? 'jpg' : sanitized;
+    final timestamp = DateTime.now().microsecondsSinceEpoch;
+    return 'memory://$authorId/cover_$timestamp.$extension';
   }
 
   @override

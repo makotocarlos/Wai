@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../bloc/auth_bloc.dart';
+import 'login_page.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -32,6 +33,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
+    // Ejecutar registro en background
     context.read<AuthBloc>().add(
           AuthSignUpRequested(
             email: _emailController.text.trim(),
@@ -44,41 +46,52 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isLoading =
-        context.watch<AuthBloc>().state.status == AuthStatus.loading;
 
     return BlocListener<AuthBloc, AuthState>(
-      listenWhen: (previous, current) =>
-          previous.infoMessage != current.infoMessage &&
-          current.infoMessage != null &&
-          current.infoMessage!.isNotEmpty,
-      listener: (context, state) async {
-        final message = state.infoMessage ??
-            'Confirma tu correo electronico. Revisa tu correo mas reciente y verifica tu cuenta.';
-        await showDialog<void>(
-          context: context,
-          barrierDismissible: false,
-          builder: (dialogContext) {
-            return AlertDialog(
-              title: const Text('Confirma tu correo'),
-              content: Text(message),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(dialogContext).pop();
-                  },
-                  child: const Text('Entendido'),
-                ),
-              ],
-            );
-          },
-        );
-        if (!context.mounted) return;
-        Navigator.of(context).pop();
+      listener: (context, state) {
+        // Si hay un error, mostrarlo
+        if (state.errorMessage != null && state.errorMessage!.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(state.errorMessage!),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+
+        // Si hay infoMessage, significa que el registro fue exitoso
+        if (state.infoMessage != null && state.infoMessage!.isNotEmpty) {
+          // Mostrar mensaje simple de éxito
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Registro enviado a correo. Revisa tu bandeja de entrada.'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 3),
+            ),
+          );
+
+          // Navegar al login
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => const LoginPage(),
+            ),
+          );
+        }
       },
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Crear cuenta'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () {
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(
+                  builder: (_) => const LoginPage(),
+                ),
+              );
+            },
+          ),
         ),
         body: SafeArea(
           child: SingleChildScrollView(
@@ -168,14 +181,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                     const SizedBox(height: 24),
                     ElevatedButton(
-                      onPressed: isLoading ? null : _submit,
-                      child: isLoading
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Text('Crear cuenta'),
+                      onPressed: _submit,
+                      child: const Text('Crear cuenta'),
                     ),
                     const SizedBox(height: 16),
                     Text(
