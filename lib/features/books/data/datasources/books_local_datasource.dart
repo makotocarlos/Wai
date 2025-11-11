@@ -74,6 +74,13 @@ class BooksLocalDataSource {
   Future<void> cacheBook(BookEntity book, {bool isSynced = true}) async {
     final db = await _localDb.database;
     
+    // 🔥 Primero, eliminar los capítulos antiguos del libro para evitar duplicados
+    await db.delete(
+      'chapters',
+      where: 'book_id = ?',
+      whereArgs: [book.id],
+    );
+    
     // 🔥 Guardar libro
     await db.insert(
       'books',
@@ -108,6 +115,13 @@ class BooksLocalDataSource {
     final batch = db.batch();
 
     for (final book in books) {
+      // 🔥 Primero, eliminar los capítulos antiguos del libro para evitar duplicados
+      batch.delete(
+        'chapters',
+        where: 'book_id = ?',
+        whereArgs: [book.id],
+      );
+      
       // 🔥 Guardar libro
       batch.insert(
         'books',
@@ -115,7 +129,7 @@ class BooksLocalDataSource {
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
       
-      // 🔥 Guardar capítulos del libro
+      // 🔥 Guardar capítulos del libro (ahora sin capítulos antiguos)
       if (book.chapters.isNotEmpty) {
         for (final chapter in book.chapters) {
           batch.insert(

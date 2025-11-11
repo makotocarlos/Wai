@@ -33,20 +33,18 @@ class SupabaseBooksRepository implements BooksRepository {
     final syncManager = sl<SyncManager>();
     final localDataSource = sl<BooksLocalDataSource>();
     
-    // 🔥 PRIMERO: Emitir caché inmediatamente
-    try {
-      final cachedBooks = await localDataSource.getCachedBooks(authorId: userId);
-      print('📚 Libros en caché: ${cachedBooks.length}');
-      if (cachedBooks.isNotEmpty) {
-        yield cachedBooks;
-      }
-    } catch (e) {
-      print('⚠️ Error cargando caché: $e');
-    }
-    
-    // 🔥 Si estamos OFFLINE, seguir emitiendo caché cada vez que cambia
+    // 🔥 Si estamos OFFLINE, usar solo caché
     if (!syncManager.isOnline) {
       print('📴 Offline - modo caché local');
+      
+      // Emitir caché inmediatamente
+      try {
+        final cachedBooks = await localDataSource.getCachedBooks(authorId: userId);
+        print('📚 Libros en caché (offline): ${cachedBooks.length}');
+        yield cachedBooks;
+      } catch (e) {
+        print('⚠️ Error cargando caché: $e');
+      }
       
       // Crear un stream que emita cada segundo para detectar cambios
       // TODO: Mejorar con StreamController que se notifique en cada cambio
@@ -61,7 +59,7 @@ class SupabaseBooksRepository implements BooksRepository {
       return;
     }
     
-    // 🔥 Si estamos ONLINE, stream desde Supabase
+    // 🔥 Si estamos ONLINE, stream desde Supabase (sin emitir caché primero)
     try {
       // 🚀 PRIMERO: Sincronizar libros locales pendientes
       await _syncLocalBooks(userId);
@@ -101,6 +99,7 @@ class SupabaseBooksRepository implements BooksRepository {
       try {
         final cachedBooks = await localDataSource.getCachedBooks(authorId: userId);
         if (cachedBooks.isNotEmpty) {
+          print('📚 Usando caché como fallback: ${cachedBooks.length}');
           yield cachedBooks;
           return;
         }
