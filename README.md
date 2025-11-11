@@ -47,7 +47,7 @@ flutter run
    - Correo electrónico
    - Contraseña (mínimo 6 caracteres)
 4. Presiona **"Crear cuenta"**
-5. **Revisa tu correo** y confirma tu email
+5. **Revisa tu correo** y confirma tu email (importante)
 6. Vuelve a la app y haz login
 
 ### 2. **Iniciar Sesión**
